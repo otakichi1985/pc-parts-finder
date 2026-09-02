@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "PC Parts Finder Capture",
+  "version": "0.1.0",
+  "description": "販売中の中古PCパーツ候補を検索結果から安全に取り込みます。",
+  "permissions": ["activeTab"],
+  "host_permissions": ["https://jp.mercari.com/search*", "http://127.0.0.1:38491/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "PC Parts Finderで検査" },
+  "content_scripts": [{ "matches": ["https://jp.mercari.com/search*"], "js": ["dist/mercari-content.js"], "run_at": "document_idle" }]
+}

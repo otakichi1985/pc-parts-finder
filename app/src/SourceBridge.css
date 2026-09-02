@@ -1,0 +1,47 @@
+.source-bridge {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  margin: 0 32px 20px;
+  padding: 14px 16px;
+  border: 1px solid #333b46;
+  background: #161a20;
+  box-shadow: 4px 4px 0 #090b0e;
+}
+
+.source-bridge button {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid #d8ff4f;
+  background: #d8ff4f;
+  color: #11150a;
+  font: 800 14px/1 inherit;
+  cursor: pointer;
+}
+
+.source-bridge button:hover { background: #efffa9; }
+.source-bridge > div { display: grid; gap: 3px; }
+.source-bridge > div > span { color: #8f9aa8; font-size: 10px; letter-spacing: .12em; }
+.source-bridge > div > strong { color: #f0f3ef; font-size: 13px; overflow-wrap: anywhere; }
+
+.scan-counts {
+  display: flex !important;
+  grid-template-columns: repeat(4, auto);
+  gap: 10px !important;
+  white-space: nowrap;
+}
+
+.scan-counts span {
+  padding-left: 10px;
+  border-left: 1px solid #3a424d;
+  color: #cbd2da !important;
+  font-size: 11px !important;
+  letter-spacing: 0 !important;
+}
+
+@media (max-width: 900px) {
+  .source-bridge { grid-template-columns: 1fr; margin-inline: 18px; }
+  .source-bridge button { width: 100%; }
+  .scan-counts { flex-wrap: wrap; }
+}

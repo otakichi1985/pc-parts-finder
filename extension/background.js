@@ -1,0 +1,1 @@
+chrome.runtime.onMessage.addListener((message)=>{if(message?.type!=="PCPF_DELIVER_MERCARI")return;fetch("http://127.0.0.1:38491/imports/mercari",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:message.token,...message.payload})}).catch(()=>{})});

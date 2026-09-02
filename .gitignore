@@ -1,0 +1,9 @@
+.DS_Store
+Thumbs.db
+*.local
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Chrome拡張のビルド成果物
+extension/dist
