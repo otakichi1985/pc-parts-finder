@@ -7,3 +7,7 @@ Thumbs.db
 
 # Chrome拡張のビルド成果物
 extension/dist
+
+# 開発内部のドキュメント（GitHubへは公開しない）
+context/
+AGENTS.md
