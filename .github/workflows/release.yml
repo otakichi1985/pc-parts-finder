@@ -16,6 +16,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Block internal documents from publication
+        shell: pwsh
+        run: |
+          $forbidden = git ls-files | Where-Object { $_ -eq 'AGENTS.md' -or $_ -like 'context/*' -or $_ -eq 'context' }
+          if ($forbidden) {
+            Write-Error "内部文書が公開対象に含まれています: $($forbidden -join ', ')"
+            exit 1
+          }
+          Write-Host "Internal documents check OK"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
