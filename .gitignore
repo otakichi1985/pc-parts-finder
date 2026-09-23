@@ -11,3 +11,8 @@ extension/dist
 # 開発内部のドキュメント（GitHubへは公開しない）
 context/
 AGENTS.md
+
+# ローカルの開発基盤と再生成できる解析結果
+/context_archive/
+/.agents/
+/graphify-out/
