@@ -4,52 +4,96 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import "./CrossSearch.css";
 import AppUpdater from "./AppUpdater";
 import { importSourceCards, type ImportedListing, type RawSourceCard } from "./sources/listingModel";
-import { usedSources, type SearchCriteria } from "./sources/sourceCatalog";
+import { criteriaFromValues, listValue, profileFor, profileIds, sourcesFor, stringValue, type FieldDef, type FieldValues, type PartProfile, type ProfileId } from "./sources/partProfiles";
+import { usedSources } from "./sources/sourceCatalog";
 
 const yen = new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 });
+const initialValues = (): Record<ProfileId, FieldValues> => ({
+  memory: profileFor("memory").defaults,
+  keyword: profileFor("keyword").defaults,
+});
+const initialStatus = "条件を確認して検索してください";
+
+function renderField(field: FieldDef, value: unknown, onChange: (value: string | string[] | boolean) => void) {
+  if (field.kind === "select") {
+    return <label key={field.id}><span>{field.label}</span><select value={stringValue(value)} disabled={field.disabled} onChange={(event) => onChange(event.target.value)}>{field.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+  }
+  if (field.kind === "text") {
+    return <label key={field.id} className="keyword-field"><span>{field.label}</span><input value={stringValue(value)} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} /></label>;
+  }
+  if (field.kind === "number") {
+    return <label key={field.id} className="keyword-field"><span>{field.label}</span><input type="text" inputMode="numeric" value={stringValue(value)} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} /></label>;
+  }
+  if (field.kind === "checks") {
+    const selected = listValue(value);
+    return <div key={field.id} className="speed-field"><span>{field.label}</span><div className="speed-options">{field.options.map((option) => <label className="speed-option" key={option.value}><input type="checkbox" checked={selected.includes(option.value)} onChange={(event) => onChange(event.target.checked ? [...selected, option.value] : selected.filter((item) => item !== option.value))} /><b>{option.label}</b></label>)}</div></div>;
+  }
+  return <label key={field.id} className="toggle-field"><input type="checkbox" checked={value !== false} onChange={(event) => onChange(event.target.checked)} /><b>{field.label}</b></label>;
+}
 
 function App() {
-  const [layout, setLayout] = useState("32GB×2");
-  const [selectedSpeeds, setSelectedSpeeds] = useState(["2400", "2666", "3200"]);
-  const [keyword, setKeyword] = useState("");
-  const [includeReview, setIncludeReview] = useState(false);
-  const [status, setStatus] = useState("条件を確認して検索してください");
+  const [profileId, setProfileId] = useState<ProfileId>("memory");
+  const profile: PartProfile = profileFor(profileId);
+  const [valuesByProfile, setValuesByProfile] = useState<Record<ProfileId, FieldValues>>(initialValues);
+  const values = valuesByProfile[profileId];
+  const availableSources = useMemo(() => sourcesFor(profile), [profile]);
+  const [selectedSources, setSelectedSources] = useState<string[]>(() => sourcesFor(profileFor("memory")).map((source) => source.id));
+  const [status, setStatus] = useState(initialStatus);
   const [scanned, setScanned] = useState(0);
   const [excluded, setExcluded] = useState(0);
   const [listings, setListings] = useState<ImportedListing[]>([]);
   const [searching, setSearching] = useState(false);
-  const searchableSources = useMemo(() => usedSources.filter((source) => source.status === "connected"), []);
-  const [selectedSources, setSelectedSources] = useState(() => searchableSources.map((source) => source.id));
   const [hasSearched, setHasSearched] = useState(false);
+  const [includeReview, setIncludeReview] = useState(false);
+
+  const criteria = useMemo(() => criteriaFromValues(profile, values), [profile, values]);
+  const canSearch = profile.canSearch(criteria) && selectedSources.length > 0;
   const sourceName = (id: ImportedListing["source"]) => usedSources.find((source) => source.id === id)?.name ?? id;
-  const capacity = layout === "32GB×2" ? "64GB" : layout === "16GB×2" ? "32GB" : "16GB";
 
-  const visibleListings = useMemo(() => [...listings]
-    .filter((item) => includeReview || item.confidence === "candidate")
-    .sort((a, b) => a.price - b.price), [listings, includeReview]);
+  const visibleListings = useMemo(() => {
+    const usable = listings.filter((item) => (profile.id === "memory" ? includeReview || item.confidence === "candidate" : item.confidence !== "excluded"));
+    return [...usable].sort((a, b) => a.price - b.price);
+  }, [listings, includeReview, profile.id]);
 
-  async function searchUsedMemory() {
-    if (selectedSources.length === 0 || selectedSpeeds.length === 0) return;
+  function setValue(id: string, value: string | string[] | boolean) {
+    setValuesByProfile((current) => ({ ...current, [profileId]: { ...current[profileId], [id]: value } }));
+  }
+
+  function switchProfile(next: ProfileId) {
+    if (next === profileId) return;
+    setProfileId(next);
+    setSelectedSources(sourcesFor(profileFor(next)).map((source) => source.id));
+    setListings([]);
+    setScanned(0);
+    setExcluded(0);
+    setHasSearched(false);
+    setSearching(false);
+    setStatus(initialStatus);
+  }
+
+  async function search() {
+    if (!canSearch) return;
+    const targets = availableSources.filter((source) => selectedSources.includes(source.id));
     setSearching(true);
     setHasSearched(true);
-    setStatus(`${selectedSources.length}サイトの販売中商品を順番に確認しています…`);
+    setStatus(`${targets.length}サイトの販売中商品を順番に確認しています…`);
     setListings([]);
     setScanned(0);
     setExcluded(0);
     try {
-      const criteria: SearchCriteria = { generation: "DDR4", capacity, layout, speeds: selectedSpeeds, keyword };
-      const connected = searchableSources.filter((source) => selectedSources.includes(source.id));
       const collected: ImportedListing[] = [];
       let scannedCount = 0;
       let excludedCount = 0;
       let completed = 0;
       let failed = 0;
       const sourceCounts: string[] = [];
-      for (const source of connected) {
-        setStatus(`${source.name}を確認中…（${completed + failed + 1}/${connected.length}）`);
+      for (const source of targets) {
+        const binding = profile.sources[source.id];
+        if (!binding) continue;
+        setStatus(`${source.name}を確認中…（${completed + failed + 1}/${targets.length}）`);
         try {
           const token = await invoke<string>("begin_source_import", { source: source.id });
-          await invoke("open_source_webview", { source: source.id, url: source.buildSearchUrl(criteria, token) });
+          await invoke("open_source_webview", { source: source.id, url: binding.buildUrl(criteria, token) });
           let received = false;
           for (let attempt = 0; attempt < 20; attempt += 1) {
             await new Promise((resolve) => window.setTimeout(resolve, 600));
@@ -73,7 +117,7 @@ function App() {
           failed += 1;
         }
       }
-      setStatus(`${completed}/${connected.length}サイト取得・${sourceCounts.join(" / ")}${failed ? ` / 応答なし${failed}` : ""}`);
+      setStatus(`${completed}/${targets.length}サイト取得・${sourceCounts.join(" / ")}${failed ? ` / 応答なし${failed}` : ""}`);
     } catch {
       setStatus("検索を開始できませんでした");
     }
@@ -83,37 +127,43 @@ function App() {
   return <main className="cross-app">
     <AppUpdater />
     <header className="cross-header">
-      <div><p>PC PARTS FINDER</p><h1>中古メモリ横断検索</h1><span>条件に合わない出品を除き、安い順に比較する。</span></div>
-      <div className="current-spec"><small>現在のPC</small><strong>DDR4-3200 16GB×2</strong><span>空き2スロット</span></div>
+      <div><p>PC PARTS FINDER</p><h1>{profile.title}</h1><span>{profile.description}</span></div>
+      {profile.showCurrentSpec && <div className="current-spec"><small>現在のPC</small><strong>DDR4-3200 16GB×2</strong><span>空き2スロット</span></div>}
     </header>
 
     <section className="search-panel" aria-label="検索条件">
-      <div className="search-heading"><span>SEARCH CONDITION</span><h2>欲しいメモリ</h2></div>
-      <label><span>規格</span><select disabled><option>DDR4</option></select></label>
-      <label><span>容量・枚数</span><select value={layout} onChange={(event) => setLayout(event.target.value)}><option>32GB×2</option><option>16GB×2</option><option>8GB×2</option></select></label>
-      <div className="speed-field"><span>速度帯（複数選択可）</span><div className="speed-options">{[["2400", "2400"], ["2666", "2666～3000"], ["3200", "3200以上"]].map(([value, label]) => <label className="speed-option" key={value}><input type="checkbox" checked={selectedSpeeds.includes(value)} onChange={(event) => setSelectedSpeeds((current) => event.target.checked ? [...current, value] : current.filter((speed) => speed !== value))} /><b>{label}</b></label>)}</div></div>
-      <label className="keyword-field"><span>メーカー・型番（任意）</span><input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="例：Crucial" /></label>
-      <button className="search-action" type="button" onClick={searchUsedMemory} disabled={searching || selectedSources.length === 0 || selectedSpeeds.length === 0}>{searching ? "検索中…" : "中古価格を横断検索"}</button>
+      <div className="search-heading">
+        <span>SEARCH CONDITION</span>
+        <h2>{profile.heading}</h2>
+        <div className="mode-switch" role="group" aria-label="検索モード">
+          {profileIds.map((id) => <button key={id} type="button" aria-pressed={id === profileId} onClick={() => switchProfile(id)}>{profileFor(id).modeLabel}</button>)}
+        </div>
+      </div>
+      <div className={`search-fields ${profile.id}`}>
+        {profile.fields.map((field) => renderField(field, values[field.id], (value) => setValue(field.id, value)))}
+        <button className="search-action" type="button" onClick={search} disabled={searching || !canSearch}>{searching ? "検索中…" : "中古価格を横断検索"}</button>
+      </div>
     </section>
 
     <section className="source-panel" aria-label="検索対象サイト">
       <div className="source-title"><b>検索対象</b><span>価格を比べたいサイトを選択</span></div>
-      <div className="source-options">{searchableSources.map((source) => <label className="source-option" key={source.id}>
+      <div className="source-options">{availableSources.map((source) => <label className="source-option" key={source.id}>
         <input type="checkbox" checked={selectedSources.includes(source.id)} onChange={(event) => setSelectedSources((current) => event.target.checked ? [...current, source.id] : current.filter((id) => id !== source.id))} />
-        <span><b>{source.name}</b><small>{source.filterSummary}</small></span>
+        <span><b>{source.name}</b><small>{profile.sources[source.id]?.summary}</small></span>
       </label>)}</div>
       <div className="search-status"><strong>{selectedSources.length === 0 ? "検索対象を1つ以上選んでください" : status}</strong>{scanned > 0 && <span>{scanned}件確認・{excluded}件除外</span>}</div>
     </section>
 
     <section className="result-panel">
-      <div className="result-header"><div><p>SEARCH RESULTS</p><h2>価格の安い順</h2></div><div className="result-tools"><label><input type="checkbox" checked={includeReview} onChange={(event) => setIncludeReview(event.target.checked)} /> 要確認も含める</label><strong>{visibleListings.length}件</strong></div></div>
+      <div className="result-header"><div><p>SEARCH RESULTS</p><h2>価格の安い順</h2></div><div className="result-tools">{profile.id === "memory" && <label><input type="checkbox" checked={includeReview} onChange={(event) => setIncludeReview(event.target.checked)} /> 要確認も含める</label>}<strong>{visibleListings.length}件</strong></div></div>
+      {profile.id === "keyword" && <div className="judgement-notice">内容の判定はしていません。キーワードに一致した販売中の出品を価格の安い順に並べています。</div>}
       <div className="shipping-notice">現在は商品表示価格での暫定順です。送料込み総額の確定は商品詳細取得の接続後に行います。</div>
       {visibleListings.length > 0 ? <div className="price-list">{visibleListings.map((item, index) => <article className="price-row" key={item.sourceId}>
         <div className="position">{index + 1}</div>
         <div className="thumb">{item.imageUrl ? <img src={item.imageUrl} alt="" /> : <span>画像なし</span>}</div>
-        <div className="item-detail"><span className="market">{sourceName(item.source)}・販売中</span><h3>{item.title}</h3><div className="tags"><span>DDR4</span><span>{layout}</span><span>デスクトップ用</span>{item.confidence === "review" && <em>要確認</em>}</div>{item.reasons.length > 0 && <small>{item.reasons.join(" / ")}</small>}</div>
+        <div className="item-detail"><span className="market">{sourceName(item.source)}・販売中</span><h3>{item.title}</h3><div className="tags">{profile.resultTags(criteria).map((tag) => <span key={tag}>{tag}</span>)}{item.confidence === "review" && <em>要確認</em>}{item.confidence === "unchecked" && <em>内容の判定なし</em>}</div>{item.confidence === "review" && item.reasons.length > 0 && <small>{item.reasons.join(" / ")}</small>}</div>
         <div className="price-cell"><span>商品表示価格</span><strong>{yen.format(item.price)}</strong><small>送料確認中</small><button type="button" onClick={() => openUrl(item.url)}>商品ページを開く</button></div>
-      </article>)}</div> : <div className="empty-results"><strong>{hasSearched && !searching ? "条件に合う販売中商品はありません" : "まだ検索していません"}</strong><span>{hasSearched && !searching ? `${layout}・選択した速度帯で確認しました。` : "上の条件を確認して「中古価格を横断検索」を押してください。"}</span></div>}
+      </article>)}</div> : <div className="empty-results"><strong>{hasSearched && !searching ? "条件に合う販売中商品はありません" : "まだ検索していません"}</strong><span>{hasSearched && !searching ? (profile.id === "memory" ? `${stringValue(criteria.profile === "memory" ? criteria.layout : "")}・選択した速度帯で確認しました。` : `「${criteria.profile === "keyword" ? criteria.keyword : ""}」で確認しました。`) : "上の条件を確認して「中古価格を横断検索」を押してください。"}</span></div>}
     </section>
   </main>;
 }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseSourceCard } from "./listingModel";
-import type { SearchCriteria } from "./sourceCatalog";
+import type { KeywordCriteria, MemoryCriteria } from "./partProfiles";
 
-const criteria: SearchCriteria = { generation: "DDR4", capacity: "64GB", layout: "32GB×2", speeds: ["2400", "2666", "3200"], keyword: "" };
+const criteria: MemoryCriteria = { profile: "memory", generation: "DDR4", capacity: "64GB", layout: "32GB×2", speeds: ["2400", "2666", "3200"], keyword: "" };
 
 describe("cross-site listing model", () => {
   it("accepts an in-stock Janpara desktop kit", () => {
@@ -41,5 +41,38 @@ describe("cross-site listing model", () => {
     const rakuma = parseSourceCard("rakuma", { href: "https://item.fril.jp/2b0018956077dbcd8c110b76c4c1afa3", text: "Crucial DDR4-3200 64GB 32GB×2 UDIMM ¥51,000" }, criteria, true);
     expect(yahoo?.sourceId).toBe("yahoo-flea:z525721380");
     expect(rakuma?.sourceId).toBe("rakuma:2b0018956077dbcd8c110b76c4c1afa3");
+  });
+});
+
+const keywordCriteria: KeywordCriteria = { profile: "keyword", keyword: "Surface Pro 8", excludeWords: [], excludeJunk: true };
+
+describe("keyword listing model", () => {
+  it("does not apply memory exclusions", () => {
+    const item = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m100", text: "Surface Pro 8 ノートPC用 SO-DIMM サーバー用 パソコン本体 16GB×2 ¥68,000" }, keywordCriteria, true);
+    expect(item?.confidence).toBe("unchecked");
+    expect(item?.reasons).toEqual([]);
+    expect(item?.price).toBe(68000);
+  });
+
+  it("excludes by price range and exclude words", () => {
+    const range: KeywordCriteria = { ...keywordCriteria, priceMin: 30000, priceMax: 100000, excludeWords: ["ケース", "フィルム"] };
+    const inRange = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m101", text: "Surface Pro 8 本体 68,000円" }, range, true);
+    const tooCheap = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m102", text: "Surface Pro 8 ケース 3,000円" }, range, true);
+    const tooExpensive = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m103", text: "Surface Pro 8 128,000円" }, range, true);
+    expect(inRange?.confidence).toBe("unchecked");
+    expect(tooCheap?.confidence).toBe("excluded");
+    expect(tooCheap?.reasons.join(" ")).toContain("除外ワード");
+    expect(tooExpensive?.confidence).toBe("excluded");
+    expect(tooExpensive?.reasons.join(" ")).toContain("上限100000円超");
+  });
+
+  it("keeps junk listings only when the toggle is off", () => {
+    const junk = "Surface Pro 8 ジャンク 本体 IS 20,000円";
+    expect(parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m104", text: junk }, keywordCriteria, true)?.confidence).toBe("excluded");
+    expect(parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m105", text: junk }, { ...keywordCriteria, excludeJunk: false }, true)?.confidence).toBe("unchecked");
+  });
+
+  it("imports nothing without a confirmed active-sale state", () => {
+    expect(parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m106", text: "Surface Pro 8 68,000円" }, keywordCriteria, false)).toBeNull();
   });
 });
