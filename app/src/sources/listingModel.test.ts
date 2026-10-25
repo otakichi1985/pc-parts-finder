@@ -48,9 +48,15 @@ describe("DDR5 memory listing model", () => {
   const ddr5: MemoryCriteria = { profile: "memory", generation: "DDR5", capacity: "64GB", layout: "32GB×2", speeds: ["4800", "5200", "6000"], keyword: "" };
 
   it("accepts a DDR5 desktop kit at a selected speed band", () => {
-    const item = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m200", text: "DDR5 32GB×2 6000 デスクトップ用 メモリ ¥32,000" }, ddr5, true);
+    const item = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m200", text: "DDR5 32GB×2 6000 デスクトップ用 メモリ 動作確認済み ¥32,000" }, ddr5, true);
     expect(item?.confidence).toBe("candidate");
     expect(item?.price).toBe(32000);
+  });
+
+  it("sends flea-market memory without condition evidence to review", () => {
+    const item = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m203", text: "DDR5 32GB×2 6000 デスクトップ用 メモリ ¥32,000" }, ddr5, true);
+    expect(item?.confidence).toBe("review");
+    expect(item?.reasons).toContain("動作状態を確認できない");
   });
 
   it("excludes DDR4 listings and speeds below the selected bands", () => {
@@ -67,9 +73,17 @@ const gpuCriteria: GpuCriteria = { profile: "gpu", maker: "nvidia", boardMaker: 
 
 describe("graphics card listing model", () => {
   it("accepts an NVIDIA board from the selected board maker", () => {
-    const item = parseSourceCard("yahoo-flea", { href: "https://paypayfleamarket.yahoo.co.jp/item/z600", text: "ASUS GeForce RTX 4070 グラフィックボード ¥80,000" }, gpuCriteria, true);
+    const item = parseSourceCard("yahoo-flea", { href: "https://paypayfleamarket.yahoo.co.jp/item/z600", text: "ASUS GeForce RTX 4070 グラフィックボード 動作確認済み ¥80,000" }, gpuCriteria, true);
     expect(item?.confidence).toBe("candidate");
     expect(item?.reasons).toEqual([]);
+  });
+
+  it("sends flea-market GPUs without condition evidence to review", () => {
+    const item = parseSourceCard("yahoo-flea", { href: "https://paypayfleamarket.yahoo.co.jp/item/z604", text: "ASUS GeForce RTX 4070 グラフィックボード ¥80,000" }, gpuCriteria, true);
+    expect(item?.confidence).toBe("review");
+    expect(item?.reasons).toContain("動作状態を確認できない");
+    const shop = parseSourceCard("janpara", { href: "https://www.janpara.co.jp/sale/search/detail/?ITMCODE=604", text: "ASUS GeForce RTX 4070 グラフィックボード ¥80,000" }, gpuCriteria, true);
+    expect(shop?.confidence).toBe("candidate");
   });
 
   it("excludes another chip maker and PC bodies", () => {
@@ -141,14 +155,28 @@ describe("motherboard listing model", () => {
     expect(unclear?.confidence).toBe("review");
     expect(unclear?.reasons).toContain("ソケットを確認できない");
   });
+
+  it("sends flea-market boards without condition evidence to review", () => {
+    const item = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m402", text: "ASUS TUF GAMING B650-PLUS AM5 マザーボード ¥20,000" }, boardCriteria, true);
+    expect(item?.confidence).toBe("review");
+    expect(item?.reasons).toContain("動作状態を確認できない");
+  });
 });
 
 const ssdCriteria: SsdCriteria = { profile: "ssd", type: "nvme", capacity: "1TB", keyword: "", excludeJunk: true };
 
 describe("SSD listing model", () => {
   it("accepts an NVMe drive with the selected capacity", () => {
-    const item = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m300", text: "WD BLACK SN850X 1TB NVMe M.2 SSD ¥12,000" }, ssdCriteria, true);
+    const item = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m300", text: "WD BLACK SN850X 1TB NVMe M.2 SSD 認識確認済み ¥12,000" }, ssdCriteria, true);
     expect(item?.confidence).toBe("candidate");
+  });
+
+  it("sends flea-market SSDs without condition evidence to review", () => {
+    const item = parseSourceCard("mercari", { href: "https://jp.mercari.com/item/m304", text: "WD BLACK SN850X 1TB NVMe M.2 SSD ¥12,000" }, ssdCriteria, true);
+    expect(item?.confidence).toBe("review");
+    expect(item?.reasons).toContain("動作状態を確認できない");
+    const shop = parseSourceCard("janpara", { href: "https://www.janpara.co.jp/sale/search/detail/?ITMCODE=304", text: "WD BLACK SN850X 1TB NVMe M.2 SSD ¥12,000" }, ssdCriteria, true);
+    expect(shop?.confidence).toBe("candidate");
   });
 
   it("excludes HDDs, other interfaces and other capacities", () => {

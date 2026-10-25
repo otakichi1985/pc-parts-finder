@@ -127,7 +127,7 @@ const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\
 const normalize = (text: string) => text.normalize("NFKC").toLowerCase();
 const terms = (parts: (string | undefined)[]) => parts.map((part) => (part ?? "").trim()).filter(Boolean).join(" ");
 const JUNK =
-  /ジャンク|動作未確認|未チェック|保証なし|現状品|部品取り|動作しない|動作しません|起動しない|起動しません|通電しない|通電しません|映らない|認識しない|不動|訳あり|難あり|返品不可|ノークレーム|nc\/nr|不良(?!\s*(?:箇所)?\s*(?:なし|無し|はありません|ありません|見られません))|故障(?!\s*(?:箇所)?\s*(?:なし|無し|はありません|ありません|見られません))/;
+  /ジャンク|動作未確認|未チェック|保証なし|現状品|部品取り|動作しない|動作しません|動作できない|動作できません|起動しない|起動しません|起動できない|起動できません|通電しない|通電しません|映らない|認識しない|認識できない|認識できません|出力できない|出力できません|表示されない|画面が出ない|映像が出ない|不動|訳あり|難あり|返品不可|ノークレーム|nc\/nr|不良(?!\s*(?:箇所)?\s*(?:なし|無し|はありません|ありません|見られません))|故障(?!\s*(?:箇所)?\s*(?:なし|無し|はありません|ありません|見られません))/;
 
 // 価格の数字を型番と取り違えないよう、判定前に取り除く。
 const PRICE_TEXT = /[¥￥]\s*[\d,]+|[\d,]+\s*円/g;
@@ -173,8 +173,20 @@ function keywordReason(text: string, keyword: string, reasons: string[]) {
 }
 
 /** 動作確認済み・起動確認済みなど、商品が動くことの記載があるか。 */
-export function hasWorkingEvidence(text: string): boolean {
-  return /動作\s*確認\s*済|起動\s*確認\s*済|正常\s*動作|動作\s*ok|動作\s*良好|テスト\s*済|稼働\s*確認\s*済/.test(normalize(text));
+const COMMON_CONDITION = /新品|未使用|未開封|動作保証|保証付き/;
+const WORKING_EVIDENCE: Record<Exclude<ProfileId, "keyword">, RegExp> = {
+  cpu: /動作\s*確認\s*済|起動\s*確認\s*済|正常\s*動作|動作\s*ok|動作\s*良好|テスト\s*済|稼働\s*確認\s*済/,
+  gpu: /動作\s*確認\s*済|起動\s*確認\s*済|映像\s*出力\s*確認|画面\s*出力\s*確認|表示\s*確認|負荷\s*テスト|ベンチマーク|正常\s*動作|動作\s*ok|動作\s*良好|テスト\s*済/,
+  memory: /動作\s*確認\s*済|認識\s*確認|認識\s*済|memtest|メモリ\s*テスト|正常\s*動作|動作\s*ok|動作\s*良好|テスト\s*済/,
+  motherboard: /動作\s*確認\s*済|起動\s*確認\s*済|post|bios\s*起動|通電\s*確認|正常\s*動作|動作\s*ok|動作\s*良好|テスト\s*済/,
+  ssd: /動作\s*確認\s*済|認識\s*確認|認識\s*済|crystaldiskinfo|\bcdi\b|健康\s*状態|通電\s*時間|正常\s*動作|動作\s*ok|動作\s*良好|テスト\s*済/,
+};
+
+export function hasWorkingEvidence(profile: ProfileId, text: string): boolean {
+  if (profile === "keyword") return true;
+  const lower = normalize(text);
+  if (COMMON_CONDITION.test(lower)) return true;
+  return WORKING_EVIDENCE[profile].test(lower);
 }
 
 // PC本体・ノート・自作PCなど、CPUやマザーボード単体ではないもの。
@@ -396,6 +408,7 @@ export const memoryProfile: PartProfile = {
   heading: "欲しいメモリ",
   title: "中古メモリ横断検索",
   description: "規格・容量・速度が合うデスクトップ用メモリを、条件に合わない出品を除いて比較する。",
+  judgementNote: "出品のタイトルと説明から規格・容量・速度を判定しています。フリマで動作確認の記載がない出品は「要確認」に分けています。",
   canSearchHint: "速度帯を1つ以上選んでください",
   fields: memoryFields,
   defaults: { generation: "DDR4", layout: DEFAULT_MEMORY_LAYOUT, speeds: memorySpeedValues("DDR4"), keyword: "" },
@@ -528,7 +541,7 @@ export const gpuProfile: PartProfile = {
   heading: "欲しいグラフィックボード",
   title: "中古グラフィックボード横断検索",
   description: "メーカーと型番を指定して、販売中のグラフィックボードを比較する。",
-  judgementNote: "出品のタイトルと説明からメーカーを判定しています。判定できない出品は「要確認」に分けています。",
+  judgementNote: "出品のタイトルと説明からメーカーを判定しています。フリマで動作確認の記載がない出品と判定できない出品は「要確認」に分けています。",
   canSearchHint: "検索条件を確認してください",
   fields: [
     {
@@ -821,7 +834,7 @@ export const motherboardProfile: PartProfile = {
   heading: "欲しいマザーボード",
   title: "中古マザーボード横断検索",
   description: "CPUソケットを選び、販売中のマザーボードを比較する。",
-  judgementNote: "出品のタイトルと説明からソケットを判定しています。判定できない出品は「要確認」に分けています。",
+  judgementNote: "出品のタイトルと説明からソケットを判定しています。フリマで動作確認の記載がない出品と判定できない出品は「要確認」に分けています。",
   canSearchHint: "検索条件を確認してください",
   fields: [
     {
@@ -918,7 +931,7 @@ export const ssdProfile: PartProfile = {
   heading: "欲しいSSD",
   title: "中古SSD横断検索",
   description: "接続方式と容量を選び、販売中のSSDを比較する。",
-  judgementNote: "出品のタイトルと説明から接続方式・容量を判定しています。容量は商品ページでも確認してください。",
+  judgementNote: "出品のタイトルと説明から接続方式・容量を判定しています。容量は商品ページでも確認してください。フリマで動作確認の記載がない出品は「要確認」に分けています。",
   canSearchHint: "検索条件を確認してください",
   fields: [
     {

@@ -41,12 +41,12 @@ export function parseSourceCard(source: UsedSourceId, card: RawSourceCard, crite
   if (!id || !Number.isFinite(price) || price <= 0) return null;
 
   const verdict = profileFor(criteria.profile).classify(text, price, criteria);
-  // フリマのCPUは、動作確認の記載がないだけでは候補にせず、商品ページで状態を確かめる「要確認」に回す。
+  // フリマのパーツは、動作確認の記載がないだけでは候補にせず、商品ページで状態を確かめる「要確認」に回す。
   if (
-    criteria.profile === "cpu" &&
+    criteria.profile !== "keyword" &&
     verdict.confidence === "candidate" &&
     (source === "mercari" || source === "yahoo-flea" || source === "rakuma") &&
-    !hasWorkingEvidence(text)
+    !hasWorkingEvidence(criteria.profile, text)
   ) {
     verdict.confidence = "review";
     verdict.reasons.push("動作状態を確認できない");

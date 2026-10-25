@@ -357,12 +357,21 @@ describe("part profiles", () => {
     const junk = cpuProfile.classify("AMD Ryzen 7 9800X3D 動作しません ジャンク 20,000円", 20000, cpuCriteria);
     expect(junk.confidence).toBe("excluded");
     expect(junk.reasons).toContain("ジャンク・動作未確認");
+    const noBoot = cpuProfile.classify("AMD Ryzen 7 9800X3D 起動できません 20,000円", 20000, cpuCriteria);
+    expect(noBoot.confidence).toBe("excluded");
+    expect(noBoot.reasons).toContain("ジャンク・動作未確認");
     const noDefect = cpuProfile.classify("AMD Ryzen 7 9800X3D 不良なし 60,000円", 60000, cpuCriteria);
     expect(noDefect.confidence).toBe("candidate");
     const noFault = cpuProfile.classify("AMD Ryzen 7 9800X3D 故障なし 60,000円", 60000, cpuCriteria);
     expect(noFault.confidence).toBe("candidate");
-    expect(hasWorkingEvidence("動作確認済み")).toBe(true);
-    expect(hasWorkingEvidence("通電確認済み")).toBe(false);
+    expect(hasWorkingEvidence("cpu", "動作確認済み")).toBe(true);
+    expect(hasWorkingEvidence("cpu", "通電確認済み")).toBe(false);
+    expect(hasWorkingEvidence("gpu", "映像出力確認済み")).toBe(true);
+    expect(hasWorkingEvidence("memory", "MemTest済み")).toBe(true);
+    expect(hasWorkingEvidence("motherboard", "BIOS起動確認")).toBe(true);
+    expect(hasWorkingEvidence("motherboard", "通電確認済み")).toBe(true);
+    expect(hasWorkingEvidence("ssd", "CrystalDiskInfo 健康状態良好")).toBe(true);
+    expect(hasWorkingEvidence("gpu", "外観のみ")).toBe(false);
   });
 
   it("requires a searchable value for each profile", () => {
