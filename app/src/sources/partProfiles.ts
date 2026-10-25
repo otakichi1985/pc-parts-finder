@@ -161,6 +161,21 @@ function memorySpeedOptions(generation: Generation): { value: string; label: str
   ];
 }
 
+const DDR4_LAYOUTS = ["64GB×2", "32GB×4", "32GB×2", "16GB×2", "8GB×2"];
+const DDR5_LAYOUTS = ["64GB×4", "64GB×2", "32GB×4", "48GB×2", "32GB×2", "16GB×2", "8GB×2"];
+const DEFAULT_MEMORY_LAYOUT = "32GB×2";
+
+export function memoryLayoutValues(generation: Generation): string[] {
+  return generation === "DDR5" ? [...DDR5_LAYOUTS] : [...DDR4_LAYOUTS];
+}
+
+function memoryLayoutOptions(generation: Generation): { value: string; label: string }[] {
+  return memoryLayoutValues(generation).map((value) => ({
+    value,
+    label: `${value}（${capacityForLayout(value)}）`,
+  }));
+}
+
 function layoutEvidence(text: string, criteria: MemoryCriteria) {
   const [moduleSize, count] = criteria.layout.split(/[×xX*]/).map((part) => part.replace(/GB/i, "").trim());
   if (!moduleSize || !count) return false;
@@ -224,11 +239,7 @@ function memoryFields(values: FieldValues): FieldDef[] {
       id: "layout",
       kind: "select",
       label: "容量・枚数",
-      options: [
-        { value: "32GB×2", label: "32GB×2" },
-        { value: "16GB×2", label: "16GB×2" },
-        { value: "8GB×2", label: "8GB×2" },
-      ],
+      options: memoryLayoutOptions(generation),
     },
     { id: "speeds", kind: "checks", label: `速度帯（${generation}）`, options: memorySpeedOptions(generation) },
     { id: "keyword", kind: "text", label: "メーカー・型番（任意）", placeholder: "例：Crucial" },
@@ -307,7 +318,7 @@ export const memoryProfile: PartProfile = {
   description: "規格・容量・速度が合うデスクトップ用メモリを、条件に合わない出品を除いて比較する。",
   canSearchHint: "速度帯を1つ以上選んでください",
   fields: memoryFields,
-  defaults: { generation: "DDR4", layout: "32GB×2", speeds: memorySpeedValues("DDR4"), keyword: "" },
+  defaults: { generation: "DDR4", layout: DEFAULT_MEMORY_LAYOUT, speeds: memorySpeedValues("DDR4"), keyword: "" },
   showCurrentSpec: true,
   reviewToggle: true,
   sources: memorySources,
@@ -880,6 +891,7 @@ export function changeFieldValue(
     const generation: Generation = value === "DDR5" ? "DDR5" : "DDR4";
     next.generation = generation;
     next.speeds = memorySpeedValues(generation);
+    next.layout = layoutForGeneration(generation, stringValue(values.layout, DEFAULT_MEMORY_LAYOUT));
   }
   if (profile.id === "cpu" && id === "maker") {
     const maker: CpuMaker = value === "intel" ? "intel" : value === "amd" ? "amd" : "any";
@@ -904,17 +916,37 @@ export function numberValue(value: unknown): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-function capacityForLayout(layout: string) {
-  if (layout === "32GB×2") return "64GB";
-  if (layout === "16GB×2") return "32GB";
-  return "16GB";
+function layoutTotalGb(layout: string): number | undefined {
+  const match = layout.match(/^(\d+)\s*GB\s*[×xX*]\s*(\d+)$/i);
+  if (!match) return undefined;
+  return Number(match[1]) * Number(match[2]);
+}
+
+/** 「32GB×2」のようなレイアウト表記から総容量を求める。 */
+export function capacityForLayout(layout: string): string {
+  const total = layoutTotalGb(layout);
+  return total === undefined ? "" : `${total}GB`;
+}
+
+/** 世代をまたいでも総容量を下げないように、最も近いレイアウトへ寄せる。 */
+function layoutKeepingCapacity(generation: Generation, layout: string): string {
+  const target = layoutTotalGb(layout) ?? 0;
+  const candidates = memoryLayoutValues(generation).map((value) => ({ value, total: layoutTotalGb(value) ?? 0 }));
+  const totals = candidates.map((candidate) => candidate.total);
+  const enough = totals.filter((total) => total >= target);
+  const chosen = enough.length ? Math.min(...enough) : Math.max(...totals);
+  return candidates.find((candidate) => candidate.total === chosen)!.value;
+}
+
+function layoutForGeneration(generation: Generation, layout: string): string {
+  return memoryLayoutValues(generation).includes(layout) ? layout : layoutKeepingCapacity(generation, layout);
 }
 
 /** 画面の入力値から、そのプロファイルの検索条件を作る。 */
 export function criteriaFromValues(profile: PartProfile, values: FieldValues): PartCriteria {
   if (profile.id === "memory") {
     const generation: Generation = stringValue(values.generation, "DDR4") === "DDR5" ? "DDR5" : "DDR4";
-    const layout = stringValue(values.layout, "32GB×2");
+    const layout = layoutForGeneration(generation, stringValue(values.layout, DEFAULT_MEMORY_LAYOUT));
     const allowedSpeeds = memorySpeedValues(generation);
     return {
       profile: "memory",

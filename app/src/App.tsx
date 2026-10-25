@@ -413,8 +413,7 @@ function App() {
           {profile.showCurrentSpec && (
             <div className="spec-card">
               <span>現在のPC</span>
-              <strong>DDR4-3200</strong>
-              <small>16GB×2・空き2スロット</small>
+              <strong>DDR4-3200 64GB</strong>
             </div>
           )}
           <AppUpdater />

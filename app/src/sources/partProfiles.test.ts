@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  capacityForLayout,
   changeFieldValue,
   cpuProfile,
   criteriaFromValues,
@@ -120,6 +121,46 @@ describe("part profiles", () => {
 
     const changed = changeFieldValue(memoryProfile, { generation: "DDR4", speeds: ["3200"] }, "generation", "DDR5");
     expect(changed.speeds).toEqual(["4800", "5200", "6000"]);
+  });
+
+  it("offers 64GB and larger memory layouts with the total capacity in the label", () => {
+    const ddr4 = fieldsFor(memoryProfile, { generation: "DDR4" }).find((field) => field.id === "layout");
+    expect(ddr4?.kind).toBe("select");
+    if (ddr4?.kind === "select") {
+      expect(ddr4.options.map((option) => option.value)).toEqual(["64GB×2", "32GB×4", "32GB×2", "16GB×2", "8GB×2"]);
+      expect(ddr4.options[0].label).toBe("64GB×2（128GB）");
+    }
+    const ddr5 = fieldsFor(memoryProfile, { generation: "DDR5" }).find((field) => field.id === "layout");
+    expect(ddr5?.kind).toBe("select");
+    if (ddr5?.kind === "select") {
+      expect(ddr5.options.map((option) => option.value)).toEqual(["64GB×4", "64GB×2", "32GB×4", "48GB×2", "32GB×2", "16GB×2", "8GB×2"]);
+      expect(ddr5.options[0].label).toBe("64GB×4（256GB）");
+      expect(ddr5.options[3].label).toBe("48GB×2（96GB）");
+    }
+  });
+
+  it("computes the total memory capacity from module size and stick count", () => {
+    expect(capacityForLayout("64GB×4")).toBe("256GB");
+    expect(capacityForLayout("48GB×2")).toBe("96GB");
+    expect(capacityForLayout("32GB×4")).toBe("128GB");
+    expect(capacityForLayout("16GB×2")).toBe("32GB");
+  });
+
+  it("keeps or raises the memory capacity when the generation or layout changes", () => {
+    const ddr5 = criteriaFromValues(memoryProfile, { generation: "DDR5", layout: "64GB×4", speeds: ["6000"], keyword: "" });
+    expect(ddr5).toMatchObject({ layout: "64GB×4", capacity: "256GB" });
+    const url = memoryProfile.sources.mercari!.buildUrl(ddr5);
+    expect(readable(url)).toContain("DDR5 64GB×4 256GB");
+
+    const switched = changeFieldValue(memoryProfile, { generation: "DDR4", layout: "32GB×2", speeds: ["3200"] }, "generation", "DDR5");
+    expect(switched).toMatchObject({ generation: "DDR5", layout: "32GB×2", speeds: ["4800", "5200", "6000"] });
+
+    const down = changeFieldValue(memoryProfile, { generation: "DDR5", layout: "64GB×4", speeds: ["6000"] }, "generation", "DDR4");
+    expect(down.layout).toBe("64GB×2");
+    expect(capacityForLayout(String(down.layout))).toBe("128GB");
+
+    const corrected = criteriaFromValues(memoryProfile, { generation: "DDR4", layout: "48GB×2", speeds: ["3200"], keyword: "" });
+    expect(corrected).toMatchObject({ generation: "DDR4", layout: "64GB×2", capacity: "128GB" });
   });
 
   it("builds the same URL rules for graphics cards, CPU, motherboards and SSD", () => {
