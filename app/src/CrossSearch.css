@@ -544,6 +544,25 @@ select:focus-visible {
   line-height: 1.5;
 }
 
+.bridge-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 154, 154, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 154, 154, 0.08);
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.bridge-error svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
 /* ------------------------------------------------------------------ */
 /* 進捗と状態                                                          */
 /* ------------------------------------------------------------------ */

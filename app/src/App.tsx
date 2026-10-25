@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./CrossSearch.css";
@@ -33,6 +33,7 @@ const partIcons: Record<ProfileId, IconName> = {
 };
 
 type SourceCount = { name: string; count: number };
+type BridgeStatus = { ok: boolean; port: number; error: string | null };
 type SearchRun = {
   phase: "idle" | "running" | "done";
   total: number;
@@ -240,16 +241,36 @@ function App() {
   const [excluded, setExcluded] = useState(0);
   const [run, setRun] = useState<SearchRun>(emptyRun);
   const [includeReview, setIncludeReview] = useState(false);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
   const searchSeq = useRef(0);
 
+  useEffect(() => {
+    let cancelled = false;
+    invoke<BridgeStatus>("bridge_status")
+      .then((status) => {
+        if (!cancelled) setBridgeError(status.ok ? null : status.error ?? "検索の連携ポートを使用できません。");
+      })
+      .catch(() => {
+        // ブラウザ確認など、Tauri の外では連携ポートを確認しない。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const searching = run.phase === "running";
-  const canSearch = profile.canSearch(criteria) && selectedTargets.length > 0;
+  const canSearch = !bridgeError && profile.canSearch(criteria) && selectedTargets.length > 0;
   const sourceName = (id: UsedSourceId) => usedSources.find((source) => source.id === id)?.name ?? id;
   const sourceNote = profile.sourceNote?.(criteria);
   const allSelected = availableSources.length > 0 && availableSources.every((source) => selectedSources.includes(source.id));
 
-  const disabledReason =
-    selectedTargets.length === 0 ? "検索対象を1つ以上選んでください" : !profile.canSearch(criteria) ? profile.canSearchHint : "";
+  const disabledReason = bridgeError
+    ? "検索の連携ポートを使用できません"
+    : selectedTargets.length === 0
+      ? "検索対象を1つ以上選んでください"
+      : !profile.canSearch(criteria)
+        ? profile.canSearchHint
+        : "";
 
   const visibleListings = useMemo(() => {
     const usable = listings.filter((item) =>
@@ -301,6 +322,15 @@ function App() {
 
   async function search() {
     if (!canSearch || searching) return;
+    try {
+      const bridge = await invoke<BridgeStatus>("bridge_status");
+      if (!bridge.ok) {
+        setBridgeError(bridge.error ?? "検索の連携ポートを使用できません。");
+        return;
+      }
+    } catch {
+      // ブラウザ確認など、Tauri の外ではそのまま進める。
+    }
     const targets = selectedTargets;
     const seq = ++searchSeq.current;
     const searchCriteria = criteria;
@@ -448,6 +478,13 @@ function App() {
                 <p className="condition-desc">{profile.description}</p>
               </div>
             </div>
+
+            {bridgeError && (
+              <div className="bridge-error" role="alert">
+                <Icon name="alert" size={16} />
+                <span>{bridgeError}</span>
+              </div>
+            )}
 
             <form
               className="search-form"

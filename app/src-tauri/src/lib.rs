@@ -10,7 +10,8 @@ use std::{
 
 pub mod update;
 
-const BRIDGE_ADDRESS: &str = "127.0.0.1:38491";
+const BRIDGE_PORT: u16 = 38491;
+const BRIDGE_ADDRESS: &str = "127.0.0.1:38491"; // source_capture.js の投稿先と同じ。
 const MAX_REQUEST_BYTES: usize = 1_000_000;
 const SOURCE_CAPTURE_SCRIPT: &str = include_str!("source_capture.js");
 
@@ -19,10 +20,27 @@ struct BridgeState {
     active_token: Mutex<Option<String>>,
     active_source: Mutex<Option<String>>,
     latest_import: Mutex<Option<Value>>,
+    bind_error: Mutex<Option<String>>,
+}
+
+#[derive(serde::Serialize)]
+struct BridgeStatus {
+    ok: bool,
+    port: u16,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn bridge_status(state: tauri::State<'_, Arc<BridgeState>>) -> BridgeStatus {
+    let error = state.bind_error.lock().expect("bridge error lock poisoned").clone();
+    BridgeStatus { ok: error.is_none(), port: BRIDGE_PORT, error }
 }
 
 #[tauri::command]
 fn begin_source_import(state: tauri::State<'_, Arc<BridgeState>>, source: String) -> Result<String, String> {
+    if let Some(error) = state.bind_error.lock().expect("bridge error lock poisoned").clone() {
+        return Err(error);
+    }
     if !matches!(source.as_str(), "mercari" | "yahoo-flea" | "rakuma" | "janpara" | "pc-koubou" | "hardoff") {
         return Err("未接続の検索元です".into());
     }
@@ -131,23 +149,30 @@ fn handle_connection(mut stream: TcpStream, state: &BridgeState) {
     response(&mut stream, "200 OK", "{\"ok\":true}");
 }
 
-fn start_bridge(state: Arc<BridgeState>) {
+fn start_bridge(state: Arc<BridgeState>) -> Result<(), String> {
+    let listener = TcpListener::bind(BRIDGE_ADDRESS).map_err(|error| {
+        eprintln!("bridge bind failed: {error}");
+        format!("検索の連携ポート（{BRIDGE_PORT}）を別のPC Parts Finderが使用しています。起動中のアプリを終了してから、このアプリを開き直してください。")
+    })?;
     thread::spawn(move || {
-        let Ok(listener) = TcpListener::bind(BRIDGE_ADDRESS) else { return; };
         for stream in listener.incoming().flatten() {
             handle_connection(stream, &state);
         }
     });
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let bridge_state = Arc::new(BridgeState::default());
-    start_bridge(bridge_state.clone());
+    if let Err(error) = start_bridge(bridge_state.clone()) {
+        *bridge_state.bind_error.lock().expect("bridge error lock poisoned") = Some(error);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(bridge_state)
         .invoke_handler(tauri::generate_handler![
+            bridge_status,
             begin_source_import,
             take_source_import,
             open_source_webview,
@@ -156,6 +181,14 @@ pub fn run() {
             update::check_for_update,
             update::download_and_apply_update
         ])
+        .on_window_event(|window, event| {
+            // メインウィンドウを閉じたとき、非表示の検索用WebViewが残ってプロセスが終了しないのを防ぐ。
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                if let Some(hidden) = window.app_handle().get_webview_window("mercari-search") {
+                    let _ = hidden.close();
+                }
+            }
+        })
         .on_page_load(|webview, payload| {
             if webview.label() == "mercari-search" && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
                 let _ = webview.eval(SOURCE_CAPTURE_SCRIPT);
