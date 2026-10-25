@@ -6,6 +6,7 @@ import {
   criteriaFromValues,
   fieldsFor,
   gpuProfile,
+  hasWorkingEvidence,
   keywordProfile,
   matchesModelKeyword,
   memoryProfile,
@@ -350,6 +351,18 @@ describe("part profiles", () => {
     expect(boxMissing.confidence).toBe("candidate");
     const coolerMissing = cpuProfile.classify("Intel Core i7-12700K クーラーのみ欠品 35,000円", 35000, criteria);
     expect(coolerMissing.confidence).toBe("candidate");
+  });
+
+  it("excludes non-working junk and keeps no-defect listings", () => {
+    const junk = cpuProfile.classify("AMD Ryzen 7 9800X3D 動作しません ジャンク 20,000円", 20000, cpuCriteria);
+    expect(junk.confidence).toBe("excluded");
+    expect(junk.reasons).toContain("ジャンク・動作未確認");
+    const noDefect = cpuProfile.classify("AMD Ryzen 7 9800X3D 不良なし 60,000円", 60000, cpuCriteria);
+    expect(noDefect.confidence).toBe("candidate");
+    const noFault = cpuProfile.classify("AMD Ryzen 7 9800X3D 故障なし 60,000円", 60000, cpuCriteria);
+    expect(noFault.confidence).toBe("candidate");
+    expect(hasWorkingEvidence("動作確認済み")).toBe(true);
+    expect(hasWorkingEvidence("通電確認済み")).toBe(false);
   });
 
   it("requires a searchable value for each profile", () => {

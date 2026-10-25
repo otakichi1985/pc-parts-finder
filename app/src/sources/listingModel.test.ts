@@ -92,8 +92,21 @@ const cpuCriteria: CpuCriteria = { profile: "cpu", maker: "amd", series: "ryzen-
 
 describe("CPU listing model", () => {
   it("accepts the selected AMD series", () => {
-    const item = parseSourceCard("rakuma", { href: "https://item.fril.jp/aaaa01", text: "AMD Ryzen 7 9800X3D CPU ¥55,000" }, cpuCriteria, true);
+    const item = parseSourceCard("rakuma", { href: "https://item.fril.jp/aaaa01", text: "AMD Ryzen 7 9800X3D CPU 動作確認済み ¥55,000" }, cpuCriteria, true);
     expect(item?.confidence).toBe("candidate");
+  });
+
+  it("sends flea-market CPUs without condition evidence to review", () => {
+    const yahoo = parseSourceCard("yahoo-flea", { href: "https://paypayfleamarket.yahoo.co.jp/item/z700", text: "AMD Ryzen 7 9800X3D CPU ¥55,000" }, cpuCriteria, true);
+    expect(yahoo?.confidence).toBe("review");
+    expect(yahoo?.reasons).toContain("動作状態を確認できない");
+    const verified = parseSourceCard("yahoo-flea", { href: "https://paypayfleamarket.yahoo.co.jp/item/z701", text: "AMD Ryzen 7 9800X3D CPU 動作確認済み ¥55,000" }, cpuCriteria, true);
+    expect(verified?.confidence).toBe("candidate");
+    const janpara = parseSourceCard("janpara", { href: "https://www.janpara.co.jp/sale/search/detail/?ITMCODE=700", text: "AMD Ryzen 7 9800X3D CPU ¥55,000" }, cpuCriteria, true);
+    expect(janpara?.confidence).toBe("candidate");
+    const junk = parseSourceCard("yahoo-flea", { href: "https://paypayfleamarket.yahoo.co.jp/item/z702", text: "AMD Ryzen 7 9800X3D CPU 動作しません ジャンク ¥20,000" }, cpuCriteria, true);
+    expect(junk?.confidence).toBe("excluded");
+    expect(junk?.reasons).toContain("ジャンク・動作未確認");
   });
 
   it("excludes coolers and a different maker", () => {

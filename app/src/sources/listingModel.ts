@@ -1,4 +1,4 @@
-import { profileFor, type Confidence, type PartCriteria } from "./partProfiles";
+import { hasWorkingEvidence, profileFor, type Confidence, type PartCriteria } from "./partProfiles";
 import type { UsedSourceId } from "./sourceCatalog";
 
 export type RawSourceCard = { href: string; text: string; imageUrl?: string };
@@ -41,6 +41,16 @@ export function parseSourceCard(source: UsedSourceId, card: RawSourceCard, crite
   if (!id || !Number.isFinite(price) || price <= 0) return null;
 
   const verdict = profileFor(criteria.profile).classify(text, price, criteria);
+  // フリマのCPUは、動作確認の記載がないだけでは候補にせず、商品ページで状態を確かめる「要確認」に回す。
+  if (
+    criteria.profile === "cpu" &&
+    verdict.confidence === "candidate" &&
+    (source === "mercari" || source === "yahoo-flea" || source === "rakuma") &&
+    !hasWorkingEvidence(text)
+  ) {
+    verdict.confidence = "review";
+    verdict.reasons.push("動作状態を確認できない");
+  }
   const title = text.replace(/[¥￥]\s*[\d,]+(?:～)?/g, "").replace(/[\d,]+\s*円/g, "").trim();
   return { source, sourceId: `${source}:${id}`, url: card.href, title, price, imageUrl: card.imageUrl, availability: "active", confidence: verdict.confidence, reasons: verdict.reasons };
 }

@@ -126,7 +126,8 @@ export type PartProfile = {
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const normalize = (text: string) => text.normalize("NFKC").toLowerCase();
 const terms = (parts: (string | undefined)[]) => parts.map((part) => (part ?? "").trim()).filter(Boolean).join(" ");
-const JUNK = /ジャンク|動作未確認|未チェック|保証なし|現状品|部品取り/;
+const JUNK =
+  /ジャンク|動作未確認|未チェック|保証なし|現状品|部品取り|動作しない|動作しません|起動しない|起動しません|通電しない|通電しません|映らない|認識しない|不動|訳あり|難あり|返品不可|ノークレーム|nc\/nr|不良(?!\s*(?:箇所)?\s*(?:なし|無し|はありません|ありません|見られません))|故障(?!\s*(?:箇所)?\s*(?:なし|無し|はありません|ありません|見られません))/;
 
 // 価格の数字を型番と取り違えないよう、判定前に取り除く。
 const PRICE_TEXT = /[¥￥]\s*[\d,]+|[\d,]+\s*円/g;
@@ -169,6 +170,11 @@ function keywordReason(text: string, keyword: string, reasons: string[]) {
   if (!trimmed || matchesModelKeyword(text, trimmed)) return false;
   reasons.push(`型番「${trimmed}」ではない`);
   return true;
+}
+
+/** 動作確認済み・起動確認済みなど、商品が動くことの記載があるか。 */
+export function hasWorkingEvidence(text: string): boolean {
+  return /動作\s*確認\s*済|起動\s*確認\s*済|正常\s*動作|動作\s*ok|動作\s*良好|テスト\s*済|稼働\s*確認\s*済/.test(normalize(text));
 }
 
 // PC本体・ノート・自作PCなど、CPUやマザーボード単体ではないもの。
@@ -727,7 +733,7 @@ export const cpuProfile: PartProfile = {
   heading: "欲しいCPU",
   title: "中古CPU横断検索",
   description: "メーカーとシリーズを選び、販売中のCPUを比較する。PC本体・ノート・冷却用品・セット品・箱や付属品のみの出品は除く。",
-  judgementNote: "出品のタイトルと説明からメーカー・シリーズ・型番を判定しています。型番を入れた場合は英数字が一致する出品だけを候補にし、判定できない出品は「要確認」に分けています。",
+  judgementNote: "出品のタイトルと説明からメーカー・シリーズ・型番を判定しています。型番を入れた場合は英数字が一致する出品だけを候補にし、フリマで動作確認の記載がない出品と判定できない出品は「要確認」に分けています。",
   canSearchHint: "検索条件を確認してください",
   fields: cpuFields,
   defaults: { maker: "any", series: "all", keyword: "", excludeJunk: true },
