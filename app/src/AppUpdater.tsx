@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Icon } from "./ui/Icon";
 import "./AppUpdater.css";
 
 interface UpdateInfo {
@@ -42,6 +43,7 @@ function AppUpdater() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [message, setMessage] = useState("");
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const started = useRef(false);
 
   const busy = status === "checking" || status === "downloading" || status === "preparing" || status === "restarting";
@@ -54,6 +56,7 @@ function AppUpdater() {
       const found = await invoke<UpdateInfo | null>("check_for_update");
       if (found) {
         setUpdate(found);
+        setDismissedVersion(null);
         setStatus("idle");
       } else {
         setUpdate(null);
@@ -141,28 +144,40 @@ function AppUpdater() {
   return (
     <div className="updater">
       <div className="updater-line">
-        <span className="updater-version">PC Parts Finder v{version || "—"}</span>
+        <span className="updater-version">v{version || "—"}</span>
         {status === "checking" && <span className="updater-note">更新を確認中…</span>}
         {status === "uptodate" && <span className="updater-note">{message}</span>}
-        {status === "error" && <span className="updater-note updater-error">{message}</span>}
+        {status === "error" && <span className="updater-note updater-error" title={message}>{message}</span>}
         {status === "downloading" && <span className="updater-note">更新ファイルをダウンロード中…{percent !== null ? ` ${percent}%` : ""}</span>}
         {status === "preparing" && <span className="updater-note">更新の準備中…</span>}
         {status === "restarting" && <span className="updater-note">再起動して更新を適用します…</span>}
         <button type="button" className="updater-check" onClick={() => runCheck(true)} disabled={busy}>
-          更新を確認
+          <Icon name="refresh" size={13} />
+          <span>更新を確認</span>
         </button>
       </div>
-      {update && (
-        <div className="updater-banner">
+      {update && dismissedVersion !== update.version && (
+        <div className="updater-banner" role="status">
+          <button
+            type="button"
+            className="updater-close"
+            aria-label="更新の案内を閉じる"
+            onClick={() => setDismissedVersion(update.version)}
+          >
+            <Icon name="x" size={15} />
+          </button>
           <div className="updater-banner-text">
             <strong>新しいバージョン v{update.version} があります（現在 v{version}）</strong>
             <span>{formatNotes(update.notes)}</span>
             {update.assetSize > 0 && <small>ダウンロードサイズ: 約{formatBytes(update.assetSize)}</small>}
           </div>
           <div className="updater-banner-actions">
-            <button type="button" onClick={() => openUrl(`${RELEASE_PAGE}${update.version}`)}>リリースノートを見る</button>
+            <button type="button" onClick={() => openUrl(`${RELEASE_PAGE}${update.version}`)}>
+              <Icon name="external" size={14} />
+              <span>リリースノート</span>
+            </button>
             <button type="button" className="updater-primary" onClick={() => applyUpdate(update)} disabled={busy}>
-              {busy ? "更新中…" : "今すぐ更新して再起動"}
+              {busy ? "更新中…" : "更新して再起動"}
             </button>
           </div>
         </div>

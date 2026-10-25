@@ -1,34 +1,225 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./CrossSearch.css";
 import AppUpdater from "./AppUpdater";
+import { Icon, type IconName } from "./ui/Icon";
 import { importSourceCards, type ImportedListing, type RawSourceCard } from "./sources/listingModel";
-import { criteriaFromValues, listValue, profileFor, profileIds, sourcesFor, stringValue, type FieldDef, type FieldValues, type PartProfile, type ProfileId } from "./sources/partProfiles";
-import { usedSources } from "./sources/sourceCatalog";
+import {
+  changeFieldValue,
+  criteriaFromValues,
+  fieldsFor,
+  listValue,
+  profileFor,
+  profileIds,
+  sourcesFor,
+  stringValue,
+  type FieldDef,
+  type FieldValues,
+  type PartProfile,
+  type ProfileId,
+} from "./sources/partProfiles";
+import { usedSources, type UsedSourceId } from "./sources/sourceCatalog";
 
 const yen = new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY", maximumFractionDigits: 0 });
-const initialValues = (): Record<ProfileId, FieldValues> => ({
-  memory: profileFor("memory").defaults,
-  keyword: profileFor("keyword").defaults,
-});
-const initialStatus = "条件を確認して検索してください";
 
-function renderField(field: FieldDef, value: unknown, onChange: (value: string | string[] | boolean) => void) {
+const partIcons: Record<ProfileId, IconName> = {
+  memory: "memory",
+  gpu: "gpu",
+  cpu: "cpu",
+  motherboard: "motherboard",
+  ssd: "ssd",
+  keyword: "keyword",
+};
+
+type SourceCount = { name: string; count: number };
+type SearchRun = {
+  phase: "idle" | "running" | "done";
+  total: number;
+  done: number;
+  completed: number;
+  failed: number;
+  counts: SourceCount[];
+  current?: string;
+};
+
+const emptyRun = (): SearchRun => ({ phase: "idle", total: 0, done: 0, completed: 0, failed: 0, counts: [] });
+
+const initialValues = (): Record<ProfileId, FieldValues> => {
+  const result = {} as Record<ProfileId, FieldValues>;
+  for (const id of profileIds) {
+    result[id] = Object.fromEntries(
+      Object.entries(profileFor(id).defaults).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value]),
+    );
+  }
+  return result;
+};
+
+function renderField(field: FieldDef, value: unknown, onChange: (value: string | string[] | boolean) => void, disabled: boolean) {
   if (field.kind === "select") {
-    return <label key={field.id}><span>{field.label}</span><select value={stringValue(value)} disabled={field.disabled} onChange={(event) => onChange(event.target.value)}>{field.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+    return (
+      <label className="field" key={field.id}>
+        <span className="field-label">{field.label}</span>
+        <select value={stringValue(value)} disabled={disabled || field.disabled} onChange={(event) => onChange(event.target.value)}>
+          {field.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
   }
   if (field.kind === "text") {
-    return <label key={field.id} className="keyword-field"><span>{field.label}</span><input value={stringValue(value)} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} /></label>;
+    return (
+      <label className="field" key={field.id}>
+        <span className="field-label">{field.label}</span>
+        <input value={stringValue(value)} placeholder={field.placeholder} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+      </label>
+    );
   }
   if (field.kind === "number") {
-    return <label key={field.id} className="keyword-field"><span>{field.label}</span><input type="text" inputMode="numeric" value={stringValue(value)} placeholder={field.placeholder} onChange={(event) => onChange(event.target.value)} /></label>;
+    return (
+      <label className="field" key={field.id}>
+        <span className="field-label">{field.label}</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={stringValue(value)}
+          placeholder={field.placeholder}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+    );
   }
   if (field.kind === "checks") {
     const selected = listValue(value);
-    return <div key={field.id} className="speed-field"><span>{field.label}</span><div className="speed-options">{field.options.map((option) => <label className="speed-option" key={option.value}><input type="checkbox" checked={selected.includes(option.value)} onChange={(event) => onChange(event.target.checked ? [...selected, option.value] : selected.filter((item) => item !== option.value))} /><b>{option.label}</b></label>)}</div></div>;
+    return (
+      <fieldset className="field field-checks" key={field.id} disabled={disabled}>
+        <legend className="field-label">{field.label}</legend>
+        <div className="check-options">
+          {field.options.map((option) => (
+            <label className="check-option" key={option.value}>
+              <input
+                type="checkbox"
+                checked={selected.includes(option.value)}
+                onChange={(event) =>
+                  onChange(event.target.checked ? [...selected, option.value] : selected.filter((item) => item !== option.value))
+                }
+              />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    );
   }
-  return <label key={field.id} className="toggle-field"><input type="checkbox" checked={value !== false} onChange={(event) => onChange(event.target.checked)} /><b>{field.label}</b></label>;
+  return (
+    <label className="field-toggle" key={field.id}>
+      <input type="checkbox" checked={value !== false} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+      <span>{field.label}</span>
+    </label>
+  );
+}
+
+function Thumb({ src }: { src?: string }) {
+  const [failed, setFailed] = useState(!src);
+  return (
+    <div className="thumb">
+      {!failed && src ? (
+        <img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+      ) : (
+        <span>
+          <Icon name="package" size={22} />
+          画像なし
+        </span>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({
+  icon,
+  tone = "normal",
+  title,
+  body,
+  action,
+}: {
+  icon: IconName;
+  tone?: "normal" | "error";
+  title: string;
+  body: string;
+  action?: { label: string; icon: IconName; onClick: () => void };
+}) {
+  return (
+    <div className={`empty ${tone}`}>
+      <span className="empty-icon">
+        <Icon name={icon} size={24} />
+      </span>
+      <strong>{title}</strong>
+      <span>{body}</span>
+      {action && (
+        <button type="button" className="empty-action" onClick={action.onClick}>
+          <Icon name={action.icon} size={16} />
+          <span>{action.label}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ListingRow({
+  item,
+  index,
+  tags,
+  sourceName,
+}: {
+  item: ImportedListing;
+  index: number;
+  tags: string[];
+  sourceName: string;
+}) {
+  return (
+    <article className="listing">
+      <div className="rank" aria-label={`${index + 1}番目`}>
+        {index + 1}
+      </div>
+      <Thumb src={item.imageUrl} />
+      <div className="listing-body">
+        <div className="listing-meta">
+          <span className="source-badge" data-source={item.source}>
+            {sourceName}
+          </span>
+          <span className="live-badge">販売中</span>
+        </div>
+        <h3 title={item.title || undefined}>{item.title || "商品名を取得できませんでした"}</h3>
+        <div className="tags">
+          {tags.map((tag) => (
+            <span key={tag}>{tag}</span>
+          ))}
+          {item.confidence === "review" && <em className="review">要確認</em>}
+          {item.confidence === "unchecked" && <em className="unchecked">内容の判定なし</em>}
+        </div>
+        {item.confidence === "review" && item.reasons.length > 0 && <p className="reasons">{item.reasons.join(" / ")}</p>}
+      </div>
+      <div className="listing-price">
+        <span className="price-label">商品表示価格</span>
+        <strong>{yen.format(item.price)}</strong>
+        <small>送料は商品ページで確認</small>
+        <button
+          type="button"
+          className="open-button"
+          onClick={() => {
+            void openUrl(item.url).catch(() => {});
+          }}
+        >
+          <Icon name="external" size={15} />
+          <span>商品ページ</span>
+        </button>
+      </div>
+    </article>
+  );
 }
 
 function App() {
@@ -36,136 +227,364 @@ function App() {
   const profile: PartProfile = profileFor(profileId);
   const [valuesByProfile, setValuesByProfile] = useState<Record<ProfileId, FieldValues>>(initialValues);
   const values = valuesByProfile[profileId];
-  const availableSources = useMemo(() => sourcesFor(profile), [profile]);
+  const criteria = useMemo(() => criteriaFromValues(profile, values), [profile, values]);
+  const fields = useMemo(() => fieldsFor(profile, values), [profile, values]);
+  const availableSources = useMemo(() => sourcesFor(profile, criteria), [profile, criteria]);
   const [selectedSources, setSelectedSources] = useState<string[]>(() => sourcesFor(profileFor("memory")).map((source) => source.id));
-  const [status, setStatus] = useState(initialStatus);
+  const selectedTargets = useMemo(
+    () => availableSources.filter((source) => selectedSources.includes(source.id)),
+    [availableSources, selectedSources],
+  );
+  const [listings, setListings] = useState<ImportedListing[]>([]);
   const [scanned, setScanned] = useState(0);
   const [excluded, setExcluded] = useState(0);
-  const [listings, setListings] = useState<ImportedListing[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [run, setRun] = useState<SearchRun>(emptyRun);
   const [includeReview, setIncludeReview] = useState(false);
+  const searchSeq = useRef(0);
 
-  const criteria = useMemo(() => criteriaFromValues(profile, values), [profile, values]);
-  const canSearch = profile.canSearch(criteria) && selectedSources.length > 0;
-  const sourceName = (id: ImportedListing["source"]) => usedSources.find((source) => source.id === id)?.name ?? id;
+  const searching = run.phase === "running";
+  const canSearch = profile.canSearch(criteria) && selectedTargets.length > 0;
+  const sourceName = (id: UsedSourceId) => usedSources.find((source) => source.id === id)?.name ?? id;
+  const sourceNote = profile.sourceNote?.(criteria);
+  const allSelected = availableSources.length > 0 && availableSources.every((source) => selectedSources.includes(source.id));
+
+  const disabledReason =
+    selectedTargets.length === 0 ? "検索対象を1つ以上選んでください" : !profile.canSearch(criteria) ? profile.canSearchHint : "";
 
   const visibleListings = useMemo(() => {
-    const usable = listings.filter((item) => (profile.id === "memory" ? includeReview || item.confidence === "candidate" : item.confidence !== "excluded"));
-    return [...usable].sort((a, b) => a.price - b.price);
-  }, [listings, includeReview, profile.id]);
+    const usable = listings.filter((item) =>
+      profile.reviewToggle ? item.confidence === "candidate" || (includeReview && item.confidence === "review") : item.confidence !== "excluded",
+    );
+    return [...usable].sort((a, b) => a.price - b.price || a.sourceId.localeCompare(b.sourceId));
+  }, [listings, includeReview, profile]);
+
+  const reviewCount = useMemo(() => listings.filter((item) => item.confidence === "review").length, [listings]);
+  const resultTags = useMemo(() => profile.resultTags(criteria), [profile, criteria]);
+
+  const statusText = (() => {
+    if (searching) {
+      const current = run.current ?? "サイト";
+      return `${current}を確認中…（${Math.min(run.done + 1, run.total)}/${run.total}）`;
+    }
+    if (run.phase === "done") {
+      if (run.completed === 0 && run.failed > 0) return `${run.failed}サイトから応答がありませんでした`;
+      return run.failed > 0 ? `${run.completed}/${run.total}サイトから取得・応答なし${run.failed}` : `${run.completed}/${run.total}サイトから取得`;
+    }
+    return disabledReason || "条件を確認して検索してください";
+  })();
+  const sourceCountsText = run.phase === "done" && run.counts.length > 0 ? run.counts.map((entry) => `${entry.name} ${entry.count}件`).join(" / ") : "";
+  const statusState = searching ? "running" : run.phase === "done" ? (run.completed === 0 && run.failed > 0 ? "error" : "done") : "idle";
+  const progress = run.total > 0 ? Math.round((Math.min(run.done, run.total) / run.total) * 100) : 0;
 
   function setValue(id: string, value: string | string[] | boolean) {
-    setValuesByProfile((current) => ({ ...current, [profileId]: { ...current[profileId], [id]: value } }));
+    const next = changeFieldValue(profile, values, id, value);
+    setValuesByProfile((current) => ({ ...current, [profileId]: next }));
+  }
+
+  function toggleAllSources() {
+    setSelectedSources(allSelected ? [] : availableSources.map((source) => source.id));
   }
 
   function switchProfile(next: ProfileId) {
     if (next === profileId) return;
+    searchSeq.current += 1;
+    const nextProfile = profileFor(next);
+    const nextCriteria = criteriaFromValues(nextProfile, valuesByProfile[next]);
     setProfileId(next);
-    setSelectedSources(sourcesFor(profileFor(next)).map((source) => source.id));
+    setSelectedSources(sourcesFor(nextProfile, nextCriteria).map((source) => source.id));
     setListings([]);
     setScanned(0);
     setExcluded(0);
-    setHasSearched(false);
-    setSearching(false);
-    setStatus(initialStatus);
+    setRun(emptyRun());
+    setIncludeReview(false);
   }
 
   async function search() {
-    if (!canSearch) return;
-    const targets = availableSources.filter((source) => selectedSources.includes(source.id));
-    setSearching(true);
-    setHasSearched(true);
-    setStatus(`${targets.length}サイトの販売中商品を順番に確認しています…`);
+    if (!canSearch || searching) return;
+    const targets = selectedTargets;
+    const seq = ++searchSeq.current;
+    const searchCriteria = criteria;
+
+    setRun({ phase: "running", total: targets.length, done: 0, completed: 0, failed: 0, counts: [], current: targets[0]?.name });
     setListings([]);
     setScanned(0);
     setExcluded(0);
-    try {
-      const collected: ImportedListing[] = [];
-      let scannedCount = 0;
-      let excludedCount = 0;
-      let completed = 0;
-      let failed = 0;
-      const sourceCounts: string[] = [];
-      for (const source of targets) {
-        const binding = profile.sources[source.id];
-        if (!binding) continue;
-        setStatus(`${source.name}を確認中…（${completed + failed + 1}/${targets.length}）`);
-        try {
-          const token = await invoke<string>("begin_source_import", { source: source.id });
-          await invoke("open_source_webview", { source: source.id, url: binding.buildUrl(criteria, token) });
-          let received = false;
-          for (let attempt = 0; attempt < 20; attempt += 1) {
-            await new Promise((resolve) => window.setTimeout(resolve, 600));
-            const imported = await invoke<{ source: ImportedListing["source"]; activeConfirmed: boolean; cards: RawSourceCard[] } | null>("take_source_import");
-            if (!imported) continue;
-            const all = importSourceCards(imported.source, imported.cards, criteria, imported.activeConfirmed);
-            const usable = all.filter((item) => item.confidence !== "excluded");
-            scannedCount += imported.cards.length;
-            excludedCount += all.length - usable.length;
-            collected.push(...usable);
-            setListings([...collected]);
-            setScanned(scannedCount);
-            setExcluded(excludedCount);
-            completed += 1;
-            sourceCounts.push(`${source.name} ${usable.length}件`);
-            received = true;
-            break;
-          }
-          if (!received) failed += 1;
-        } catch {
-          failed += 1;
+
+    const collected: ImportedListing[] = [];
+    const counts: SourceCount[] = [];
+    let scannedCount = 0;
+    let excludedCount = 0;
+    let completed = 0;
+    let failed = 0;
+
+    for (const source of targets) {
+      if (seq !== searchSeq.current) return;
+      setRun({ phase: "running", total: targets.length, done: completed + failed, completed, failed, counts: [...counts], current: source.name });
+      const binding = profile.sources[source.id];
+      if (!binding) continue;
+      try {
+        const token = await invoke<string>("begin_source_import", { source: source.id });
+        if (seq !== searchSeq.current) return;
+        await invoke("open_source_webview", { source: source.id, url: binding.buildUrl(searchCriteria, token) });
+        if (seq !== searchSeq.current) return;
+        let received = false;
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 600));
+          if (seq !== searchSeq.current) return;
+          const imported = await invoke<{ source: UsedSourceId; activeConfirmed: boolean; cards: RawSourceCard[] } | null>("take_source_import");
+          if (!imported) continue;
+          const all = importSourceCards(imported.source, imported.cards, searchCriteria, imported.activeConfirmed);
+          const usable = all.filter((item) => item.confidence !== "excluded");
+          scannedCount += imported.cards.length;
+          excludedCount += all.length - usable.length;
+          collected.push(...usable);
+          setListings([...collected]);
+          setScanned(scannedCount);
+          setExcluded(excludedCount);
+          completed += 1;
+          counts.push({ name: source.name, count: usable.length });
+          received = true;
+          break;
         }
+        if (!received) failed += 1;
+      } catch {
+        failed += 1;
       }
-      setStatus(`${completed}/${targets.length}サイト取得・${sourceCounts.join(" / ")}${failed ? ` / 応答なし${failed}` : ""}`);
-    } catch {
-      setStatus("検索を開始できませんでした");
+      if (seq !== searchSeq.current) return;
+      setRun({ phase: "running", total: targets.length, done: completed + failed, completed, failed, counts: [...counts], current: source.name });
     }
-    setSearching(false);
+
+    if (seq !== searchSeq.current) return;
+    setRun({ phase: "done", total: targets.length, done: targets.length, completed, failed, counts });
   }
 
-  return <main className="cross-app">
-    <AppUpdater />
-    <header className="cross-header">
-      <div><p>PC PARTS FINDER</p><h1>{profile.title}</h1><span>{profile.description}</span></div>
-      {profile.showCurrentSpec && <div className="current-spec"><small>現在のPC</small><strong>DDR4-3200 16GB×2</strong><span>空き2スロット</span></div>}
-    </header>
+  const empty = (() => {
+    if (run.phase === "idle") {
+      return {
+        icon: "search" as IconName,
+        title: "まだ検索していません",
+        body: "条件を選んで「検索」を押すと、販売中の商品を商品表示価格の安い順に表示します。",
+      };
+    }
+    if (searching) {
+      return {
+        icon: "refresh" as IconName,
+        title: "サイトを確認しています",
+        body: statusText,
+      };
+    }
+    if (run.completed === 0 && run.failed > 0) {
+      return {
+        icon: "alert" as IconName,
+        tone: "error" as const,
+        title: "商品を取得できませんでした",
+        body: "サイトから応答がありませんでした。時間をおいて再試行してください。",
+        action: { label: "再試行", icon: "refresh" as IconName, onClick: () => void search() },
+      };
+    }
+    if (reviewCount > 0) {
+      return {
+        icon: "alert" as IconName,
+        title: "確認が必要な候補が見つかりました",
+        body: `条件を自動で確認できた商品はありません。要確認の候補が${reviewCount}件あります。`,
+        action: { label: "要確認を表示", icon: "check" as IconName, onClick: () => setIncludeReview(true) },
+      };
+    }
+    return {
+      icon: "package" as IconName,
+      title: "条件に合う商品はありませんでした",
+      body: "条件を広げるか、検索対象のサイトを増やしてみてください。",
+    };
+  })();
 
-    <section className="search-panel" aria-label="検索条件">
-      <div className="search-heading">
-        <span>SEARCH CONDITION</span>
-        <h2>{profile.heading}</h2>
-        <div className="mode-switch" role="group" aria-label="検索モード">
-          {profileIds.map((id) => <button key={id} type="button" aria-pressed={id === profileId} onClick={() => switchProfile(id)}>{profileFor(id).modeLabel}</button>)}
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="brand">
+          <span className="brand-mark">
+            <Icon name="package" size={22} />
+          </span>
+          <div>
+            <p>PC PARTS FINDER</p>
+            <h1>中古PCパーツ横断検索</h1>
+          </div>
+        </div>
+        <div className="header-side">
+          {profile.showCurrentSpec && (
+            <div className="spec-card">
+              <span>現在のPC</span>
+              <strong>DDR4-3200</strong>
+              <small>16GB×2・空き2スロット</small>
+            </div>
+          )}
+          <AppUpdater />
+        </div>
+      </header>
+
+      <div className="workspace">
+        <nav className="part-nav" aria-label="パーツの種類">
+          <p className="nav-label">パーツを選ぶ</p>
+          <div className="nav-items">
+            {profileIds.map((id) => (
+              <button key={id} type="button" aria-pressed={id === profileId} onClick={() => switchProfile(id)} title={profileFor(id).description}>
+                <Icon name={partIcons[id]} size={18} />
+                <span>{profileFor(id).modeLabel}</span>
+              </button>
+            ))}
+          </div>
+          <div className="nav-foot">
+            <span>検索対象</span>
+            <strong>
+              {selectedTargets.length} / {availableSources.length}サイト
+            </strong>
+          </div>
+        </nav>
+
+        <div className="content">
+          <section className="condition-panel" aria-labelledby="condition-heading" aria-busy={searching}>
+            <div className="condition-head">
+              <div>
+                <p className="eyebrow">検索条件</p>
+                <h2 id="condition-heading">{profile.heading}</h2>
+                <p className="condition-desc">{profile.description}</p>
+              </div>
+            </div>
+
+            <form
+              className="search-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void search();
+              }}
+            >
+              {fields.map((field) => renderField(field, values[field.id], (value) => setValue(field.id, value), searching))}
+              <button className="search-action" type="submit" disabled={searching || !canSearch}>
+                <Icon name={searching ? "refresh" : "search"} size={18} />
+                <span>{searching ? "検索中" : "検索"}</span>
+              </button>
+            </form>
+
+            <div className="source-block">
+              <div className="source-head">
+                <div>
+                  <h3>検索対象</h3>
+                  <p>
+                    {availableSources.length}サイト中{selectedTargets.length}サイトを選択
+                  </p>
+                </div>
+                <button type="button" className="text-button" onClick={toggleAllSources} disabled={searching || availableSources.length === 0}>
+                  <Icon name={allSelected ? "x" : "check"} size={14} />
+                  <span>{allSelected ? "すべて解除" : "すべて選択"}</span>
+                </button>
+              </div>
+              <div className="source-options">
+                {availableSources.map((source) => (
+                  <label className="source-option" key={source.id}>
+                    <input
+                      type="checkbox"
+                      checked={selectedSources.includes(source.id)}
+                      disabled={searching}
+                      onChange={(event) =>
+                        setSelectedSources((current) =>
+                          event.target.checked ? [...current, source.id] : current.filter((id) => id !== source.id),
+                        )
+                      }
+                    />
+                    <span>
+                      <b>{source.name}</b>
+                      <small>{profile.sources[source.id]?.summary}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {sourceNote && (
+                <p className="source-note">
+                  <Icon name="info" size={14} />
+                  <span>{sourceNote}</span>
+                </p>
+              )}
+            </div>
+
+            <div className={`run-status ${statusState}`} aria-live="polite">
+              <span className="status-dot" aria-hidden="true" />
+              <strong>{statusText}</strong>
+              {sourceCountsText && <span className="status-detail">{sourceCountsText}</span>}
+              {scanned > 0 && <span className="status-detail">{scanned}件確認・{excluded}件除外</span>}
+              {searching && (
+                <div
+                  className="progress"
+                  role="progressbar"
+                  aria-label="検索の進捗"
+                  aria-valuemin={0}
+                  aria-valuemax={run.total}
+                  aria-valuenow={run.done}
+                >
+                  <span style={{ width: `${progress}%` }} />
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="results-panel" aria-labelledby="results-heading">
+            <div className="results-head">
+              <div className="results-title">
+                <p className="eyebrow">検索結果</p>
+                <h2 id="results-heading">価格の安い順</h2>
+                <p className="results-sub">商品表示価格で並べています。送料は商品ページで確認してください。</p>
+              </div>
+              <div className="results-tools">
+                {profile.reviewToggle && (
+                  <label className="review-toggle" title={reviewCount === 0 ? "要確認の候補はありません" : undefined}>
+                    <input
+                      type="checkbox"
+                      checked={includeReview}
+                      disabled={reviewCount === 0}
+                      onChange={(event) => setIncludeReview(event.target.checked)}
+                    />
+                    <span>要確認も表示</span>
+                    <em>{reviewCount}</em>
+                  </label>
+                )}
+                <div className="result-count">
+                  <strong>{visibleListings.length}</strong>
+                  <span>件</span>
+                </div>
+              </div>
+            </div>
+
+            {(profile.judgementNote || (run.phase === "done" && run.failed > 0)) && (
+              <div className="notice-stack">
+                {profile.judgementNote && (
+                  <p className="notice">
+                    <Icon name="info" size={15} />
+                    <span>{profile.judgementNote}</span>
+                  </p>
+                )}
+                {run.phase === "done" && run.failed > 0 && (
+                  <p className="notice warning">
+                    <Icon name="alert" size={15} />
+                    <span>{run.failed}サイトから応答がありませんでした。取得できた結果だけを表示しています。</span>
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="results-scroll">
+              {visibleListings.length > 0 ? (
+                <div className="price-list">
+                  {visibleListings.map((item, index) => (
+                    <ListingRow key={item.sourceId} item={item} index={index} tags={resultTags} sourceName={sourceName(item.source)} />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState icon={empty.icon} tone={empty.tone} title={empty.title} body={empty.body} action={empty.action} />
+              )}
+            </div>
+          </section>
         </div>
       </div>
-      <div className={`search-fields ${profile.id}`}>
-        {profile.fields.map((field) => renderField(field, values[field.id], (value) => setValue(field.id, value)))}
-        <button className="search-action" type="button" onClick={search} disabled={searching || !canSearch}>{searching ? "検索中…" : "中古価格を横断検索"}</button>
-      </div>
-    </section>
-
-    <section className="source-panel" aria-label="検索対象サイト">
-      <div className="source-title"><b>検索対象</b><span>価格を比べたいサイトを選択</span></div>
-      <div className="source-options">{availableSources.map((source) => <label className="source-option" key={source.id}>
-        <input type="checkbox" checked={selectedSources.includes(source.id)} onChange={(event) => setSelectedSources((current) => event.target.checked ? [...current, source.id] : current.filter((id) => id !== source.id))} />
-        <span><b>{source.name}</b><small>{profile.sources[source.id]?.summary}</small></span>
-      </label>)}</div>
-      <div className="search-status"><strong>{selectedSources.length === 0 ? "検索対象を1つ以上選んでください" : status}</strong>{scanned > 0 && <span>{scanned}件確認・{excluded}件除外</span>}</div>
-    </section>
-
-    <section className="result-panel">
-      <div className="result-header"><div><p>SEARCH RESULTS</p><h2>価格の安い順</h2></div><div className="result-tools">{profile.id === "memory" && <label><input type="checkbox" checked={includeReview} onChange={(event) => setIncludeReview(event.target.checked)} /> 要確認も含める</label>}<strong>{visibleListings.length}件</strong></div></div>
-      {profile.id === "keyword" && <div className="judgement-notice">内容の判定はしていません。キーワードに一致した販売中の出品を価格の安い順に並べています。</div>}
-      <div className="shipping-notice">現在は商品表示価格での暫定順です。送料込み総額の確定は商品詳細取得の接続後に行います。</div>
-      {visibleListings.length > 0 ? <div className="price-list">{visibleListings.map((item, index) => <article className="price-row" key={item.sourceId}>
-        <div className="position">{index + 1}</div>
-        <div className="thumb">{item.imageUrl ? <img src={item.imageUrl} alt="" /> : <span>画像なし</span>}</div>
-        <div className="item-detail"><span className="market">{sourceName(item.source)}・販売中</span><h3>{item.title}</h3><div className="tags">{profile.resultTags(criteria).map((tag) => <span key={tag}>{tag}</span>)}{item.confidence === "review" && <em>要確認</em>}{item.confidence === "unchecked" && <em>内容の判定なし</em>}</div>{item.confidence === "review" && item.reasons.length > 0 && <small>{item.reasons.join(" / ")}</small>}</div>
-        <div className="price-cell"><span>商品表示価格</span><strong>{yen.format(item.price)}</strong><small>送料確認中</small><button type="button" onClick={() => openUrl(item.url)}>商品ページを開く</button></div>
-      </article>)}</div> : <div className="empty-results"><strong>{hasSearched && !searching ? "条件に合う販売中商品はありません" : "まだ検索していません"}</strong><span>{hasSearched && !searching ? (profile.id === "memory" ? `${stringValue(criteria.profile === "memory" ? criteria.layout : "")}・選択した速度帯で確認しました。` : `「${criteria.profile === "keyword" ? criteria.keyword : ""}」で確認しました。`) : "上の条件を確認して「中古価格を横断検索」を押してください。"}</span></div>}
-    </section>
-  </main>;
+    </div>
+  );
 }
 
 export default App;
