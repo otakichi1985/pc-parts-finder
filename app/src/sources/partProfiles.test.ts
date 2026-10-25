@@ -306,6 +306,35 @@ describe("part profiles", () => {
     expect(gamingFor.confidence).toBe("candidate");
   });
 
+  it("excludes box-only, accessory-only and cooler-only listings, but keeps CPU-only", () => {
+    const criteria: CpuCriteria = { profile: "cpu", maker: "intel", series: "core-i7", keyword: "12700", excludeJunk: true };
+    const boxOnly = cpuProfile.classify("Intel Core i7-12700K 箱のみ 10,000円", 10000, criteria);
+    expect(boxOnly.confidence).toBe("excluded");
+    expect(boxOnly.reasons).toContain("付属品・箱のみ");
+    const emptyBox = cpuProfile.classify("Intel Core i7-12700K 空箱 8,000円", 8000, criteria);
+    expect(emptyBox.confidence).toBe("excluded");
+    const coolerOnly = cpuProfile.classify("Intel Core i7-12700K クーラーのみ 3,000円", 3000, criteria);
+    expect(coolerOnly.confidence).toBe("excluded");
+    expect(coolerOnly.reasons).toContain("付属品・箱のみ");
+    const manualOnly = cpuProfile.classify("Intel Core i7-12700K 説明書と箱のみ 2,000円", 2000, criteria);
+    expect(manualOnly.confidence).toBe("excluded");
+    const noCpu = cpuProfile.classify("Intel Core i7-12700K CPUは付属しません 8,000円", 8000, criteria);
+    expect(noCpu.confidence).toBe("excluded");
+    expect(noCpu.reasons).toContain("CPUなし");
+    const withCooler = cpuProfile.classify("Intel Core i7-12700K クーラー付き 35,000円", 35000, criteria);
+    expect(withCooler.confidence).toBe("candidate");
+    const withFan = cpuProfile.classify("Intel Core i7-12700K CPUファン付き 35,000円", 35000, criteria);
+    expect(withFan.confidence).toBe("candidate");
+    const withoutCooler = cpuProfile.classify("Intel Core i7-12700K クーラーなし 35,000円", 35000, criteria);
+    expect(withoutCooler.confidence).toBe("candidate");
+    const bodyOnly = cpuProfile.classify("Intel Core i7-12700K 本体のみ 35,000円", 35000, criteria);
+    expect(bodyOnly.confidence).toBe("candidate");
+    const boxMissing = cpuProfile.classify("Intel Core i7-12700K 箱のみ欠品 35,000円", 35000, criteria);
+    expect(boxMissing.confidence).toBe("candidate");
+    const coolerMissing = cpuProfile.classify("Intel Core i7-12700K クーラーのみ欠品 35,000円", 35000, criteria);
+    expect(coolerMissing.confidence).toBe("candidate");
+  });
+
   it("requires a searchable value for each profile", () => {
     expect(memoryProfile.canSearch(memoryCriteria)).toBe(true);
     expect(memoryProfile.canSearch({ ...memoryCriteria, speeds: [] })).toBe(false);

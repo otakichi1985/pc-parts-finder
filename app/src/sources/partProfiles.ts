@@ -644,15 +644,23 @@ function cpuClassify(text: string, criteria: CpuCriteria): Verdict {
     (BOARD_WORD.test(lower) && !/対応|不要|別売|なし/.test(lower)) || (BOARD_MODEL.test(lower) && BUNDLE_MARK.test(lower));
   if (boardBundle) reasons.push("マザーボード・セット品");
 
-  const cooler = /cpuクーラー|クーラー|cooler|グリス|シリコングリス|リテールクーラー|ヒートシンク|水冷/.test(lower);
-  const cpuWithCooler = /(?:付属|付き|同梱).{0,8}クーラー|クーラー.{0,8}(?:付属|付き|同梱)/.test(lower);
-  const coolerOnly = cooler && !cpuWithCooler;
+  const cpuMissing = /cpu\s*(?:は|が)?\s*(?:なし|無し|欠品|欠落|付属しません|含まれません|ありません)|cpu\s*(?:not\s*included)/.test(lower);
+  if (cpuMissing) reasons.push("CPUなし");
+
+  const accessoryOnly =
+    /(?:箱|外箱|空箱|パッケージ|梱包|説明書|マニュアル|取扱説明書|保証書|シール|ステッカー|フィルム|ブラケット|バックプレート|金具|ネジ|ケーブル|コード|クーラー|冷却ファン|ファン|ヒートシンク|水冷|ラジエーター|ポンプ|グリス|aio|付属品|付属)(?:\s*(?:のみ|だけ|単体|専用))(?!\s*(?:欠品|なし|無し|不足|別))|(?:箱|パッケージ|梱包)[^\n]{0,10}(?:のみ|だけ)(?!\s*(?:欠品|なし|無し|不足|別))|空箱|\bbox\s*only\b|\bcooler\s*only\b|\bfan\s*only\b/.test(lower);
+  if (accessoryOnly) reasons.push("付属品・箱のみ");
+
+  const cooler = /cpuクーラー|cpuファン|クーラー|cooler|グリス|シリコングリス|リテールクーラー|ヒートシンク|水冷/.test(lower);
+  const cpuWithCooler = /(?:付属|付き|同梱).{0,8}(?:クーラー|ファン)|(?:クーラー|ファン).{0,8}(?:付属|付き|同梱)/.test(lower);
+  const coolerAbsent = /(?:クーラー|ファン)\s*(?:のみ)?\s*(?:なし|無し|別売|別|欠品)|cooler\s*(?:not|without)/.test(lower);
+  const coolerOnly = cooler && !cpuWithCooler && !coolerAbsent && !accessoryOnly;
   if (coolerOnly) reasons.push("CPU本体ではなく冷却用品");
 
-  const notCpu = !cpuLike && !wholeDevice && !brandDevice && !mobileCpu && !boardBundle && !coolerOnly;
+  const notCpu = !cpuLike && !wholeDevice && !brandDevice && !mobileCpu && !boardBundle && !coolerOnly && !accessoryOnly && !cpuMissing;
   if (notCpu) reasons.push("CPUではない");
 
-  const primaryExclusion = notCpu || wholeDevice || brandDevice || mobileCpu || boardBundle || coolerOnly;
+  const primaryExclusion = notCpu || wholeDevice || brandDevice || mobileCpu || boardBundle || coolerOnly || accessoryOnly || cpuMissing;
 
   const systemScore =
     (SYSTEM_STORAGE.test(lower) ? 2 : 0) +
@@ -710,7 +718,7 @@ export const cpuProfile: PartProfile = {
   modeLabel: "CPU",
   heading: "欲しいCPU",
   title: "中古CPU横断検索",
-  description: "メーカーとシリーズを選び、販売中のCPUを比較する。PC本体・ノート・冷却用品・セット品は除く。",
+  description: "メーカーとシリーズを選び、販売中のCPUを比較する。PC本体・ノート・冷却用品・セット品・箱や付属品のみの出品は除く。",
   judgementNote: "出品のタイトルと説明からメーカー・シリーズ・型番を判定しています。型番を入れた場合は英数字が一致する出品だけを候補にし、判定できない出品は「要確認」に分けています。",
   canSearchHint: "検索条件を確認してください",
   fields: cpuFields,
