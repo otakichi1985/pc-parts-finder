@@ -197,6 +197,25 @@ describe("part profiles", () => {
     expect(gpuProfile.classify("ASUS GeForce RTX 4060 グラフィックボード 50,000円", 50000, gpuCriteria).reasons).toContain("型番「RTX 4070」ではない");
   });
 
+  it("excludes PC bodies and assembly services from GPU results", () => {
+    const criteria: GpuCriteria = { profile: "gpu", maker: "amd", boardMaker: "", keyword: "RX9070XT", excludeJunk: true };
+    const assembly = gpuProfile.classify("【あなたに合った最高のPCをご提案!】オーダーメイド【新品】ゲーミング/動画編集/AI画像生成/DTM/静音RX9070XT", 250000, criteria);
+    expect(assembly.confidence).toBe("excluded");
+    expect(assembly.reasons).toContain("組み立て代行・PC販売");
+    const whitePc = gpuProfile.classify("【全て新品】美麗な2面ガラス白色PC[5700X3D/RX9070XT/メモリ32GB/NVMe1TB/750W Bronze]", 305000, criteria);
+    expect(whitePc.confidence).toBe("excluded");
+    expect(whitePc.reasons).toContain("PC本体・ノート");
+    const config = gpuProfile.classify("intel Core Ultra7 270K Plus/RX9070XT/Z890/DDR5 16G/M.2 500G/850W", 263900, criteria);
+    expect(config.confidence).toBe("excluded");
+    expect(config.reasons).toContain("PC本体（複合構成）");
+    const galleria = gpuProfile.classify("GALLERIA XA7R-97XT 7800X3D RX9070XT 32GB", 255000, criteria);
+    expect(galleria.confidence).toBe("excluded");
+    const gpu = gpuProfile.classify("ASRock Radeon RX9070XT Steel Legend 16GB グラフィックボード 動作確認済み", 130000, criteria);
+    expect(gpu.confidence).toBe("candidate");
+    const gpuForPc = gpuProfile.classify("RX9070XT グラフィックボード デスクトップPC用 動作確認済み", 130000, criteria);
+    expect(gpuForPc.confidence).toBe("candidate");
+  });
+
   it("classifies CPU series and excludes coolers and other makers", () => {
     expect(cpuProfile.classify("AMD Ryzen 7 9800X3D 60,000円", 60000, cpuCriteria).confidence).toBe("candidate");
     const intel = cpuProfile.classify("Intel Core i7-14700K 50,000円", 50000, cpuCriteria);
@@ -371,6 +390,7 @@ describe("part profiles", () => {
     expect(hasWorkingEvidence("motherboard", "BIOS起動確認")).toBe(true);
     expect(hasWorkingEvidence("motherboard", "通電確認済み")).toBe(true);
     expect(hasWorkingEvidence("ssd", "CrystalDiskInfo 健康状態良好")).toBe(true);
+    expect(hasWorkingEvidence("gpu", "動作品")).toBe(true);
     expect(hasWorkingEvidence("gpu", "外観のみ")).toBe(false);
   });
 

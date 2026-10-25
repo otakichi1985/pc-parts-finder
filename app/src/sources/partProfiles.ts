@@ -173,7 +173,7 @@ function keywordReason(text: string, keyword: string, reasons: string[]) {
 }
 
 /** 動作確認済み・起動確認済みなど、商品が動くことの記載があるか。 */
-const COMMON_CONDITION = /新品|未使用|未開封|動作保証|保証付き/;
+const COMMON_CONDITION = /新品|未使用|未開封|動作保証|保証付き|完動品|動作品|稼働品/;
 const WORKING_EVIDENCE: Record<Exclude<ProfileId, "keyword">, RegExp> = {
   cpu: /動作\s*確認\s*済|起動\s*確認\s*済|正常\s*動作|動作\s*ok|動作\s*良好|テスト\s*済|稼働\s*確認\s*済/,
   gpu: /動作\s*確認\s*済|起動\s*確認\s*済|映像\s*出力\s*確認|画面\s*出力\s*確認|表示\s*確認|負荷\s*テスト|ベンチマーク|正常\s*動作|動作\s*ok|動作\s*良好|テスト\s*済/,
@@ -191,7 +191,19 @@ export function hasWorkingEvidence(profile: ProfileId, text: string): boolean {
 
 // PC本体・ノート・自作PCなど、CPUやマザーボード単体ではないもの。
 const WHOLE_DEVICE =
-  /pc本体|パソコン本体|デスクトップ\s*(?:pc|パソコン|型)|ノート\s*(?:pc|パソコン)|ゲーミング\s*(?:pc|パソコン|デスクトップ|ノート)(?!\s*(?:向け|用|対応|に最適|のcpu|のパーツ|パーツ))|bto|自作\s*pc|オーダーパソコン|ミニ\s*pc|一体型\s*(?:pc|パソコン)|タワー型|pc\s*セット|パソコン\s*セット|\blaptop\b|モバイル\s*(?:pc|ノート|版)/;
+  /pc本体|パソコン本体|デスクトップ\s*(?:pc|パソコン|型)(?!\s*(?:用|向け|対応|に最適|のパーツ|パーツ))|ノート\s*(?:pc|パソコン)|ゲーミング\s*(?:pc|パソコン|デスクトップ|ノート)(?!\s*(?:向け|用|対応|に最適|のcpu|のパーツ|パーツ))|bto|自作\s*pc|オーダーパソコン|ミニ\s*pc|一体型\s*(?:pc|パソコン)|タワー型|pc\s*セット|パソコン\s*セット|\blaptop\b|モバイル\s*(?:pc|ノート|版)/;
+
+// 「高性能PC」「白色PC」「ハイエンドPC」など、PC本体を表す言い方。
+const PC_BODY =
+  /(?:ゲーミング|高性能|ハイエンド|白色|静音|自作|bto|オーダー|完成品|新品|ゲーム用|配信用)\s*(?:pc|パソコン)(?!\s*(?:用|向け|対応|に最適|のパーツ|パーツ))|(?:pc|パソコン)\s*(?:本体|販売|工房|ショップ|セット|完成|組み立て|組立|製作)|pc\s*[\[\(（【]/;
+
+// 組み立て代行・オーダーメイド・PC販売などのサービス。
+const ASSEMBLY_SERVICE =
+  /組み立て代行|組立代行|組み立て依頼|組立依頼|製作代行|制作代行|オーダーメイド|オーダー\s*(?:pc|パソコン)|カスタム\s*(?:pc|パソコン)|自作\s*pc|bto\s*(?:pc|パソコン|カスタム|専門|ショップ|工房)|pc\s*(?:販売|工房|ショップ|製作|組み立て)|パソコン\s*(?:販売|工房|ショップ|製作|組み立て)|完成品|ご提案|見積|構成変更|パーツ選定|組み立て\s*(?:いたします|します|承り|承ります)|pc\s*を\s*組み立て/;
+
+// GPU検索でPC本体・CPU+GPUセットを見分けるためのCPU型番。
+const CPU_MODEL =
+  /core\s*ultra\s*[579]\s*[-\s]?\d{3}|ultra\s*[579]\s*[-\s]?\d{3}|(?:ryzen|ライゼン|yzen)\s*[3579]\s*\d{4}|core\s*i[3579]\s*[-\s]?\d{3,5}|i[3579][-\s]?\d{3,5}|\b[3579]\d{3}x3d\b|\b1[0-9]{4}[kf]{1,2}\b|\b2[0-9]{2}[kf]{1,2}\b/;
 
 // 型番だけではPC本体か判断しにくい、ノート・デスクトップの代表的なシリーズ。
 const DEVICE_BRANDS =
@@ -429,8 +441,9 @@ export const memoryProfile: PartProfile = {
     const laptop = /so[-\s]?dimm|sodimm|ノート(?:pc)?用|m471a/.test(lower);
     const server = /registered|rdimm|サーバー用|ecc\s*\/|m393a/.test(lower);
     const wholePc =
-      /ゲーミング\s*pc|デスクトップ\s*pc|パソコン本体/.test(lower) &&
-      !/(?:デスクトップ|ゲーミング)\s*(?:pc)?\s*用/.test(lower);
+      (/ゲーミング\s*pc|デスクトップ\s*pc|パソコン本体/.test(lower) && !/(?:デスクトップ|ゲーミング)\s*(?:pc)?\s*用/.test(lower)) ||
+      PC_BODY.test(lower) ||
+      ASSEMBLY_SERVICE.test(lower);
     const junk = JUNK.test(lower);
     const keywordMismatch = keywordReason(text, memory.keyword, reasons);
     const accessoryOnly = ACCESSORY_ONLY.test(lower);
@@ -498,8 +511,10 @@ function gpuClassify(text: string, criteria: GpuCriteria): Verdict {
   const junk = junkReason(lower, criteria.excludeJunk, reasons);
   const accessoryOnly = ACCESSORY_ONLY.test(lower);
   if (accessoryOnly) reasons.push("付属品・箱のみ");
-  const wholeDevice = WHOLE_DEVICE.test(lower);
+  const wholeDevice = WHOLE_DEVICE.test(lower) || PC_BODY.test(lower);
   if (wholeDevice) reasons.push("PC本体・ノート");
+  const assembly = ASSEMBLY_SERVICE.test(lower);
+  if (assembly) reasons.push("組み立て代行・PC販売");
   const external = /外付けgpu|egpu|グラフィックボックス/.test(lower);
   if (external) reasons.push("外付けGPU");
   const accessory = /水冷ブロック|water\s*block|ライザーケーブル|ライザーカード|サポートステイ/.test(lower);
@@ -531,7 +546,16 @@ function gpuClassify(text: string, criteria: GpuCriteria): Verdict {
   const makerEvidence =
     criteria.maker === "any" ? nvidia || amd || intel || categoryEvidence : criteria.maker === "nvidia" ? nvidia : criteria.maker === "amd" ? amd : intel;
   if (!makerEvidence) reasons.push("メーカーを確認できない");
-  const blocked = junk || wholeDevice || external || accessory || mismatch || boardMismatch || keywordMismatch || accessoryOnly;
+  const configScore =
+    (nvidia || amd || intel ? 1 : 0) +
+    (CPU_MODEL.test(lower) ? 1 : 0) +
+    (SYSTEM_MEMORY.test(lower) ? 1 : 0) +
+    (SYSTEM_STORAGE.test(lower) ? 1 : 0) +
+    (BOARD_MODEL.test(lower) ? 1 : 0);
+  const systemPc = !wholeDevice && !assembly && configScore >= 2;
+  if (systemPc) reasons.push("PC本体（複合構成）");
+  const blocked =
+    junk || wholeDevice || assembly || systemPc || external || accessory || mismatch || boardMismatch || keywordMismatch || accessoryOnly;
   return { confidence: blocked ? "excluded" : makerEvidence ? "candidate" : "review", reasons };
 }
 
@@ -662,8 +686,11 @@ function cpuClassify(text: string, criteria: CpuCriteria): Verdict {
   const mobileCpu = MOBILE_CPU.test(lower) || /ノート\s*用|モバイル\s*(?:版|用)/.test(lower);
   if (mobileCpu) reasons.push("モバイルCPU");
 
-  const wholeDevice = WHOLE_DEVICE.test(lower);
+  const wholeDevice = WHOLE_DEVICE.test(lower) || PC_BODY.test(lower);
   if (wholeDevice) reasons.push("PC本体・ノート");
+
+  const assembly = ASSEMBLY_SERVICE.test(lower);
+  if (assembly) reasons.push("組み立て代行・PC販売");
 
   const brandDevice = DEVICE_BRANDS.test(lower);
   if (brandDevice && !wholeDevice) reasons.push("PC本体・ノート");
@@ -687,7 +714,7 @@ function cpuClassify(text: string, criteria: CpuCriteria): Verdict {
   const notCpu = !cpuLike && !wholeDevice && !brandDevice && !mobileCpu && !boardBundle && !coolerOnly && !accessoryOnly && !cpuMissing;
   if (notCpu) reasons.push("CPUではない");
 
-  const primaryExclusion = notCpu || wholeDevice || brandDevice || mobileCpu || boardBundle || coolerOnly || accessoryOnly || cpuMissing;
+  const primaryExclusion = notCpu || wholeDevice || brandDevice || mobileCpu || boardBundle || coolerOnly || accessoryOnly || cpuMissing || assembly;
 
   const systemScore =
     (SYSTEM_STORAGE.test(lower) ? 2 : 0) +
@@ -800,8 +827,10 @@ function motherboardClassify(text: string, criteria: MotherboardCriteria): Verdi
   const lower = normalize(text);
   const reasons: string[] = [];
   const junk = junkReason(lower, criteria.excludeJunk, reasons);
-  const wholePc = WHOLE_DEVICE.test(lower);
+  const wholePc = WHOLE_DEVICE.test(lower) || PC_BODY.test(lower);
   if (wholePc) reasons.push("PC本体・ノート");
+  const assembly = ASSEMBLY_SERVICE.test(lower);
+  if (assembly) reasons.push("組み立て代行・PC販売");
   const accessoryOnly = ACCESSORY_ONLY.test(lower);
   if (accessoryOnly) reasons.push("付属品・箱のみ");
   const cooler = /cpuクーラー|クーラー|cooler|グリス/.test(lower);
@@ -824,7 +853,7 @@ function motherboardClassify(text: string, criteria: MotherboardCriteria): Verdi
     }
   }
   if (!boardEvidence) reasons.push("マザーボードを確認できない");
-  const blocked = junk || wholePc || cooler || socketMismatch || keywordMismatch || accessoryOnly;
+  const blocked = junk || wholePc || assembly || cooler || socketMismatch || keywordMismatch || accessoryOnly;
   return { confidence: blocked ? "excluded" : boardEvidence && socketEvidence ? "candidate" : "review", reasons };
 }
 
@@ -884,6 +913,10 @@ function ssdClassify(text: string, criteria: SsdCriteria): Verdict {
   const keywordMismatch = keywordReason(text, criteria.keyword, reasons);
   const accessoryOnly = ACCESSORY_ONLY.test(lower);
   if (accessoryOnly) reasons.push("付属品・箱のみ");
+  const wholeDevice = WHOLE_DEVICE.test(lower) || PC_BODY.test(lower);
+  if (wholeDevice) reasons.push("PC本体・ノート");
+  const assembly = ASSEMBLY_SERVICE.test(lower);
+  if (assembly) reasons.push("組み立て代行・PC販売");
   const hdd = /hdd|ハードディスク/.test(lower) && !/ssd/.test(lower);
   if (hdd) reasons.push("HDD");
   const enclosure = /ssdケース|外付けケース|usb\d|変換アダプタ|sataケーブル/.test(lower);
@@ -921,7 +954,7 @@ function ssdClassify(text: string, criteria: SsdCriteria): Verdict {
   if (!evidence) reasons.push("SSDを確認できない");
   const typeOk = criteria.type === "any" || (criteria.type === "nvme" ? nvme : sata);
   const capacityKnown = criteria.capacity === "any" || (SSD_CAPACITY_PATTERNS[criteria.capacity]?.test(lower) ?? false);
-  const blocked = junk || hdd || enclosure || typeMismatch || capacityMismatch || keywordMismatch || accessoryOnly;
+  const blocked = junk || wholeDevice || assembly || hdd || enclosure || typeMismatch || capacityMismatch || keywordMismatch || accessoryOnly;
   return { confidence: blocked ? "excluded" : evidence && typeOk && capacityKnown ? "candidate" : "review", reasons };
 }
 
