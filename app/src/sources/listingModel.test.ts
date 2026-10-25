@@ -78,11 +78,11 @@ describe("graphics card listing model", () => {
     expect(radeon?.confidence).toBe("excluded");
     expect(radeon?.reasons).toContain("NVIDIA製ではない");
     expect(pc?.confidence).toBe("excluded");
-    expect(pc?.reasons).toContain("PC本体");
+    expect(pc?.reasons).toContain("PC本体・ノート");
   });
 
   it("sends a board without maker evidence to review", () => {
-    const item = parseSourceCard("yahoo-flea", { href: "https://paypayfleamarket.yahoo.co.jp/item/z603", text: "グラフィックボード 12GB ¥20,000" }, gpuCriteria, true);
+    const item = parseSourceCard("yahoo-flea", { href: "https://paypayfleamarket.yahoo.co.jp/item/z603", text: "グラフィックボード 12GB ¥20,000" }, { ...gpuCriteria, boardMaker: "", keyword: "" }, true);
     expect(item?.confidence).toBe("review");
     expect(item?.reasons).toContain("メーカーを確認できない");
   });

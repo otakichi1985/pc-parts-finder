@@ -7,6 +7,7 @@ import {
   fieldsFor,
   gpuProfile,
   keywordProfile,
+  matchesModelKeyword,
   memoryProfile,
   motherboardProfile,
   profileIds,
@@ -163,6 +164,12 @@ describe("part profiles", () => {
     expect(corrected).toMatchObject({ generation: "DDR4", layout: "64GB×2", capacity: "128GB" });
   });
 
+  it("keeps desktop memory described as for a gaming PC", () => {
+    const memory = memoryProfile.classify("Crucial DDR4-3200 32GB×2 ゲーミングPC用 デスクトップ用メモリ 15,000円", 15000, memoryCriteria);
+    expect(memory.confidence).toBe("candidate");
+    expect(memory.reasons).not.toContain("メモリ単体ではなくPC本体");
+  });
+
   it("builds the same URL rules for graphics cards, CPU, motherboards and SSD", () => {
     expectUrlsInsideRules(gpuProfile, gpuCriteria as never);
     expectUrlsInsideRules(cpuProfile, cpuCriteria as never);
@@ -182,9 +189,11 @@ describe("part profiles", () => {
     const amd = gpuProfile.classify("AMD Radeon RX 7900 XTX グラフィックボード 100,000円", 100000, gpuCriteria);
     expect(amd.confidence).toBe("excluded");
     expect(amd.reasons).toContain("NVIDIA製ではない");
-    expect(gpuProfile.classify("グラフィックボード 30,000円", 30000, { ...gpuCriteria, maker: "intel" }).confidence).toBe("review");
+    expect(gpuProfile.classify("グラフィックボード 30,000円", 30000, { ...gpuCriteria, maker: "intel", boardMaker: "", keyword: "" }).confidence).toBe("review");
     expect(gpuProfile.classify("RTX 4060 ノートPC用 80,000円", 80000, gpuCriteria).confidence).toBe("excluded");
     expect(gpuProfile.classify("グラフィックボード ジャンク 10,000円", 10000, gpuCriteria).confidence).toBe("excluded");
+    expect(gpuProfile.classify("ASUS GeForce RTX 4060 グラフィックボード 50,000円", 50000, gpuCriteria).confidence).toBe("excluded");
+    expect(gpuProfile.classify("ASUS GeForce RTX 4060 グラフィックボード 50,000円", 50000, gpuCriteria).reasons).toContain("型番「RTX 4070」ではない");
   });
 
   it("classifies CPU series and excludes coolers and other makers", () => {
@@ -196,7 +205,7 @@ describe("part profiles", () => {
     expect(lowerSeries.confidence).toBe("excluded");
     expect(lowerSeries.reasons).toContain("選択したシリーズではない");
     expect(cpuProfile.classify("CPUクーラー 5,000円", 5000, cpuCriteria).confidence).toBe("excluded");
-    expect(cpuProfile.classify("CPU 10,000円", 10000, cpuCriteria).confidence).toBe("review");
+    expect(cpuProfile.classify("CPU 10,000円", 10000, { ...cpuCriteria, keyword: "" }).confidence).toBe("review");
   });
 
   it("classifies motherboards by socket", () => {
@@ -204,7 +213,10 @@ describe("part profiles", () => {
     const intel = motherboardProfile.classify("MSI B760M マザーボード LGA1700 15,000円", 15000, motherboardCriteria);
     expect(intel.confidence).toBe("excluded");
     expect(intel.reasons).toContain("選択したソケットではない");
-    expect(motherboardProfile.classify("マザーボード 10,000円", 10000, motherboardCriteria).confidence).toBe("review");
+    expect(motherboardProfile.classify("マザーボード 10,000円", 10000, { ...motherboardCriteria, keyword: "" }).confidence).toBe("review");
+    const model = motherboardProfile.classify("ASUS B760M マザーボード LGA1700 15,000円", 15000, motherboardCriteria);
+    expect(model.confidence).toBe("excluded");
+    expect(model.reasons).toContain("型番「B650」ではない");
   });
 
   it("classifies SSD type and capacity", () => {
@@ -215,8 +227,11 @@ describe("part profiles", () => {
     const small = ssdProfile.classify("WD SN850X 500GB NVMe SSD 10,000円", 10000, ssdCriteria);
     expect(small.confidence).toBe("excluded");
     expect(small.reasons).toContain("選択した容量ではない");
-    expect(ssdProfile.classify("SSD 1TB 10,000円", 10000, ssdCriteria).confidence).toBe("review");
+    expect(ssdProfile.classify("SSD 1TB 10,000円", 10000, { ...ssdCriteria, keyword: "" }).confidence).toBe("review");
     expect(ssdProfile.classify("HDD 1TB 3,000円", 3000, ssdCriteria).confidence).toBe("excluded");
+    const model = ssdProfile.classify("WD SN770 1TB NVMe M.2 SSD 10,000円", 10000, ssdCriteria);
+    expect(model.confidence).toBe("excluded");
+    expect(model.reasons).toContain("型番「SN850X」ではない");
   });
 
   it("searches the four fixed-price sites by keyword", () => {
@@ -253,6 +268,42 @@ describe("part profiles", () => {
     expect(intel.series).toBe("all");
     const criteria = criteriaFromValues(cpuProfile, { maker: "amd", series: "core-i7", keyword: "" });
     expect(criteria).toMatchObject({ profile: "cpu", maker: "amd", series: "all" });
+  });
+
+  it("matches model numbers by alphanumeric sequence and ignores prices", () => {
+    expect(matchesModelKeyword("Intel Core i7-12700F 35,000円", "12700")).toBe(true);
+    expect(matchesModelKeyword("Intel Core i7-7700 ¥12,700", "12700")).toBe(false);
+    expect(matchesModelKeyword("512700", "12700")).toBe(false);
+    expect(matchesModelKeyword("12700F", "12700")).toBe(true);
+    expect(matchesModelKeyword("ASUS GeForce RTX4070 Ti", "RTX 4070")).toBe(true);
+    expect(matchesModelKeyword("DDR5-6000 32GB", "DDR5 6000")).toBe(true);
+    expect(matchesModelKeyword("DDR5-5600 32GB", "DDR5 6000")).toBe(false);
+    expect(matchesModelKeyword("WD Black SN850X 1TB", "SN850X")).toBe(true);
+    expect(matchesModelKeyword("ASUS B650M マザーボード", "B650")).toBe(true);
+    expect(matchesModelKeyword("ASUS B650 マザーボード", "B650M")).toBe(false);
+    expect(matchesModelKeyword("Surface Pro 8", "Surface Pro 8")).toBe(true);
+  });
+
+  it("excludes PC bodies, laptops, bundles and mobile CPUs, but keeps CPU-only listings", () => {
+    const criteria: CpuCriteria = { profile: "cpu", maker: "intel", series: "core-i7", keyword: "12700", excludeJunk: true };
+    const gamingPc = cpuProfile.classify("ゲーミングPC Intel Core i7-12700F RTX3060 115,000円", 115000, criteria);
+    expect(gamingPc.confidence).toBe("excluded");
+    expect(gamingPc.reasons).toContain("PC本体・ノート");
+    const laptop = cpuProfile.classify("ASUS Vivobook X1403ZA 第12世代 Core i7 16GB 512GB 65,500円", 65500, criteria);
+    expect(laptop.confidence).toBe("excluded");
+    expect(laptop.reasons).toContain("PC本体・ノート");
+    const bundle = cpuProfile.classify("MSI MAG Z690 CARBON WIFI + Intel Core i7 12700 54,800円", 54800, criteria);
+    expect(bundle.confidence).toBe("excluded");
+    expect(bundle.reasons).toContain("マザーボード・セット品");
+    const mobile = cpuProfile.classify("Intel Core i7-12700H 2.3GHz 86,500円", 86500, criteria);
+    expect(mobile.confidence).toBe("excluded");
+    expect(mobile.reasons).toContain("モバイルCPU");
+    const cpuOnly = cpuProfile.classify("Intel Core i7-12700F CPU 本体 動作確認済み 31,800円", 31800, criteria);
+    expect(cpuOnly.confidence).toBe("candidate");
+    const compatible = cpuProfile.classify("Intel Core i7-12700K マザーボード対応 35,000円", 35000, criteria);
+    expect(compatible.confidence).toBe("candidate");
+    const gamingFor = cpuProfile.classify("Intel Core i7-12700K ゲーミングPC向け 35,000円", 35000, criteria);
+    expect(gamingFor.confidence).toBe("candidate");
   });
 
   it("requires a searchable value for each profile", () => {

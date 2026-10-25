@@ -182,7 +182,7 @@ function ListingRow({
   sourceName: string;
 }) {
   return (
-    <article className="listing">
+    <article className={`listing ${item.confidence}`}>
       <div className="rank" aria-label={`${index + 1}番目`}>
         {index + 1}
       </div>
@@ -200,9 +200,10 @@ function ListingRow({
             <span key={tag}>{tag}</span>
           ))}
           {item.confidence === "review" && <em className="review">要確認</em>}
+          {item.confidence === "excluded" && <em className="excluded">除外</em>}
           {item.confidence === "unchecked" && <em className="unchecked">内容の判定なし</em>}
         </div>
-        {item.confidence === "review" && item.reasons.length > 0 && <p className="reasons">{item.reasons.join(" / ")}</p>}
+        {item.confidence !== "candidate" && item.reasons.length > 0 && <p className="reasons">{item.reasons.join(" / ")}</p>}
       </div>
       <div className="listing-price">
         <span className="price-label">商品表示価格</span>
@@ -241,6 +242,7 @@ function App() {
   const [excluded, setExcluded] = useState(0);
   const [run, setRun] = useState<SearchRun>(emptyRun);
   const [includeReview, setIncludeReview] = useState(false);
+  const [includeExcluded, setIncludeExcluded] = useState(false);
   const [bridgeError, setBridgeError] = useState<string | null>(null);
   const searchSeq = useRef(0);
 
@@ -273,11 +275,21 @@ function App() {
         : "";
 
   const visibleListings = useMemo(() => {
-    const usable = listings.filter((item) =>
-      profile.reviewToggle ? item.confidence === "candidate" || (includeReview && item.confidence === "review") : item.confidence !== "excluded",
-    );
+    const usable = listings.filter((item) => {
+      if (item.confidence === "excluded") return false;
+      if (!profile.reviewToggle) return true;
+      return item.confidence === "candidate" || (includeReview && item.confidence === "review");
+    });
     return [...usable].sort((a, b) => a.price - b.price || a.sourceId.localeCompare(b.sourceId));
   }, [listings, includeReview, profile]);
+
+  const excludedListings = useMemo(
+    () =>
+      [...listings.filter((item) => item.confidence === "excluded")].sort(
+        (a, b) => a.price - b.price || a.sourceId.localeCompare(b.sourceId),
+      ),
+    [listings],
+  );
 
   const reviewCount = useMemo(() => listings.filter((item) => item.confidence === "review").length, [listings]);
   const resultTags = useMemo(() => profile.resultTags(criteria), [profile, criteria]);
@@ -318,6 +330,7 @@ function App() {
     setExcluded(0);
     setRun(emptyRun());
     setIncludeReview(false);
+    setIncludeExcluded(false);
   }
 
   async function search() {
@@ -339,6 +352,7 @@ function App() {
     setListings([]);
     setScanned(0);
     setExcluded(0);
+    setIncludeExcluded(false);
 
     const collected: ImportedListing[] = [];
     const counts: SourceCount[] = [];
@@ -367,7 +381,7 @@ function App() {
           const usable = all.filter((item) => item.confidence !== "excluded");
           scannedCount += imported.cards.length;
           excludedCount += all.length - usable.length;
-          collected.push(...usable);
+          collected.push(...all);
           setListings([...collected]);
           setScanned(scannedCount);
           setExcluded(excludedCount);
@@ -581,6 +595,17 @@ function App() {
                     <em>{reviewCount}</em>
                   </label>
                 )}
+                {excludedListings.length > 0 && (
+                  <label className="review-toggle" title="除外した商品と理由を表示します">
+                    <input
+                      type="checkbox"
+                      checked={includeExcluded}
+                      onChange={(event) => setIncludeExcluded(event.target.checked)}
+                    />
+                    <span>除外も表示</span>
+                    <em>{excludedListings.length}</em>
+                  </label>
+                )}
                 <div className="result-count">
                   <strong>{visibleListings.length}</strong>
                   <span>件</span>
@@ -609,11 +634,32 @@ function App() {
               {visibleListings.length > 0 ? (
                 <div className="price-list">
                   {visibleListings.map((item, index) => (
-                    <ListingRow key={item.sourceId} item={item} index={index} tags={resultTags} sourceName={sourceName(item.source)} />
+                    <ListingRow
+                      key={item.sourceId}
+                      item={item}
+                      index={index}
+                      tags={item.confidence === "candidate" ? resultTags : []}
+                      sourceName={sourceName(item.source)}
+                    />
                   ))}
                 </div>
               ) : (
                 <EmptyState icon={empty.icon} tone={empty.tone} title={empty.title} body={empty.body} action={empty.action} />
+              )}
+
+              {includeExcluded && excludedListings.length > 0 && (
+                <section className="excluded-results" aria-labelledby="excluded-heading">
+                  <div className="excluded-head">
+                    <h3 id="excluded-heading">除外した商品</h3>
+                    <span>{excludedListings.length}件</span>
+                    <p>条件に合わないため候補から外した商品です。理由を確認できます。</p>
+                  </div>
+                  <div className="price-list">
+                    {excludedListings.map((item, index) => (
+                      <ListingRow key={item.sourceId} item={item} index={index} tags={[]} sourceName={sourceName(item.source)} />
+                    ))}
+                  </div>
+                </section>
               )}
             </div>
           </section>
