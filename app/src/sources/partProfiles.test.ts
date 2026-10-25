@@ -306,6 +306,23 @@ describe("part profiles", () => {
     expect(gamingFor.confidence).toBe("candidate");
   });
 
+  it("excludes accessory-only listings across part profiles", () => {
+    const memory = memoryProfile.classify("Crucial DDR4-3200 32GB×2 箱のみ 5,000円", 5000, memoryCriteria);
+    expect(memory.confidence).toBe("excluded");
+    expect(memory.reasons).toContain("付属品・箱のみ");
+    const gpu = gpuProfile.classify("ASUS GeForce RTX 4070 箱のみ 10,000円", 10000, gpuCriteria);
+    expect(gpu.confidence).toBe("excluded");
+    expect(gpu.reasons).toContain("付属品・箱のみ");
+    const gpuWithBox = gpuProfile.classify("ASUS GeForce RTX 4070 箱付き 80,000円", 80000, gpuCriteria);
+    expect(gpuWithBox.confidence).toBe("candidate");
+    const motherboard = motherboardProfile.classify("ASUS B650M マザーボード AM5 箱のみ 5,000円", 5000, motherboardCriteria);
+    expect(motherboard.confidence).toBe("excluded");
+    expect(motherboard.reasons).toContain("付属品・箱のみ");
+    const ssd = ssdProfile.classify("WD SN850X 1TB NVMe SSD 箱のみ 5,000円", 5000, ssdCriteria);
+    expect(ssd.confidence).toBe("excluded");
+    expect(ssd.reasons).toContain("付属品・箱のみ");
+  });
+
   it("excludes box-only, accessory-only and cooler-only listings, but keeps CPU-only", () => {
     const criteria: CpuCriteria = { profile: "cpu", maker: "intel", series: "core-i7", keyword: "12700", excludeJunk: true };
     const boxOnly = cpuProfile.classify("Intel Core i7-12700K 箱のみ 10,000円", 10000, criteria);

@@ -199,6 +199,10 @@ const SYSTEM_PSU = /電源|psu|power\s*supply/;
 const SYSTEM_CASE = /ケース|\bcase\b/;
 const SYSTEM_DISPLAY = /モニター|ディスプレイ|monitor|display|\b\d{2,3}\s*hz\b/;
 
+// 箱・クーラー・説明書など、商品本体ではなく付属品だけの出品。
+const ACCESSORY_ONLY =
+  /(?:箱|外箱|空箱|パッケージ|梱包|説明書|マニュアル|取扱説明書|保証書|シール|ステッカー|フィルム|ブラケット|バックプレート|金具|ネジ|ケーブル|コード|クーラー|冷却ファン|ファン|ヒートシンク|水冷|ラジエーター|ポンプ|グリス|aio|付属品|付属)(?:\s*(?:のみ|だけ|単体|専用))(?!\s*(?:欠品|なし|無し|不足|別))|(?:箱|パッケージ|梱包)[^\n]{0,10}(?:のみ|だけ)(?!\s*(?:欠品|なし|無し|不足|別))|空箱|\bbox\s*only\b|\bcooler\s*only\b|\bfan\s*only\b/;
+
 function junkReason(lower: string, enabled: boolean, reasons: string[]) {
   if (!enabled || !JUNK.test(lower)) return false;
   reasons.push("ジャンク・動作未確認");
@@ -410,6 +414,8 @@ export const memoryProfile: PartProfile = {
       !/(?:デスクトップ|ゲーミング)\s*(?:pc)?\s*用/.test(lower);
     const junk = JUNK.test(lower);
     const keywordMismatch = keywordReason(text, memory.keyword, reasons);
+    const accessoryOnly = ACCESSORY_ONLY.test(lower);
+    if (accessoryOnly) reasons.push("付属品・箱のみ");
     const speed = detectedSpeed(lower, memory.generation);
     if (!isGeneration) reasons.push(otherGeneration ? `${memory.generation === "DDR4" ? "DDR5" : "DDR4"}の出品` : `${memory.generation}を確認できない`);
     if (!layoutMatches) reasons.push(`${memory.layout}を確認できない`);
@@ -427,6 +433,7 @@ export const memoryProfile: PartProfile = {
       wholePc ||
       junk ||
       keywordMismatch ||
+      accessoryOnly ||
       (!!speed && !memory.speeds.includes(speedBand(speed, memory.generation)));
     return { confidence: excluded ? "excluded" : speed ? "candidate" : "review", reasons };
   },
@@ -470,6 +477,8 @@ function gpuClassify(text: string, criteria: GpuCriteria): Verdict {
   const lower = normalize(text);
   const reasons: string[] = [];
   const junk = junkReason(lower, criteria.excludeJunk, reasons);
+  const accessoryOnly = ACCESSORY_ONLY.test(lower);
+  if (accessoryOnly) reasons.push("付属品・箱のみ");
   const wholeDevice = WHOLE_DEVICE.test(lower);
   if (wholeDevice) reasons.push("PC本体・ノート");
   const external = /外付けgpu|egpu|グラフィックボックス/.test(lower);
@@ -503,7 +512,7 @@ function gpuClassify(text: string, criteria: GpuCriteria): Verdict {
   const makerEvidence =
     criteria.maker === "any" ? nvidia || amd || intel || categoryEvidence : criteria.maker === "nvidia" ? nvidia : criteria.maker === "amd" ? amd : intel;
   if (!makerEvidence) reasons.push("メーカーを確認できない");
-  const blocked = junk || wholeDevice || external || accessory || mismatch || boardMismatch || keywordMismatch;
+  const blocked = junk || wholeDevice || external || accessory || mismatch || boardMismatch || keywordMismatch || accessoryOnly;
   return { confidence: blocked ? "excluded" : makerEvidence ? "candidate" : "review", reasons };
 }
 
@@ -647,8 +656,7 @@ function cpuClassify(text: string, criteria: CpuCriteria): Verdict {
   const cpuMissing = /cpu\s*(?:は|が)?\s*(?:なし|無し|欠品|欠落|付属しません|含まれません|ありません)|cpu\s*(?:not\s*included)/.test(lower);
   if (cpuMissing) reasons.push("CPUなし");
 
-  const accessoryOnly =
-    /(?:箱|外箱|空箱|パッケージ|梱包|説明書|マニュアル|取扱説明書|保証書|シール|ステッカー|フィルム|ブラケット|バックプレート|金具|ネジ|ケーブル|コード|クーラー|冷却ファン|ファン|ヒートシンク|水冷|ラジエーター|ポンプ|グリス|aio|付属品|付属)(?:\s*(?:のみ|だけ|単体|専用))(?!\s*(?:欠品|なし|無し|不足|別))|(?:箱|パッケージ|梱包)[^\n]{0,10}(?:のみ|だけ)(?!\s*(?:欠品|なし|無し|不足|別))|空箱|\bbox\s*only\b|\bcooler\s*only\b|\bfan\s*only\b/.test(lower);
+  const accessoryOnly = ACCESSORY_ONLY.test(lower);
   if (accessoryOnly) reasons.push("付属品・箱のみ");
 
   const cooler = /cpuクーラー|cpuファン|クーラー|cooler|グリス|シリコングリス|リテールクーラー|ヒートシンク|水冷/.test(lower);
@@ -775,6 +783,8 @@ function motherboardClassify(text: string, criteria: MotherboardCriteria): Verdi
   const junk = junkReason(lower, criteria.excludeJunk, reasons);
   const wholePc = WHOLE_DEVICE.test(lower);
   if (wholePc) reasons.push("PC本体・ノート");
+  const accessoryOnly = ACCESSORY_ONLY.test(lower);
+  if (accessoryOnly) reasons.push("付属品・箱のみ");
   const cooler = /cpuクーラー|クーラー|cooler|グリス/.test(lower);
   if (cooler) reasons.push("冷却用品");
   const keywordMismatch = keywordReason(text, criteria.keyword, reasons);
@@ -795,7 +805,7 @@ function motherboardClassify(text: string, criteria: MotherboardCriteria): Verdi
     }
   }
   if (!boardEvidence) reasons.push("マザーボードを確認できない");
-  const blocked = junk || wholePc || cooler || socketMismatch || keywordMismatch;
+  const blocked = junk || wholePc || cooler || socketMismatch || keywordMismatch || accessoryOnly;
   return { confidence: blocked ? "excluded" : boardEvidence && socketEvidence ? "candidate" : "review", reasons };
 }
 
@@ -853,6 +863,8 @@ function ssdClassify(text: string, criteria: SsdCriteria): Verdict {
   const reasons: string[] = [];
   const junk = junkReason(lower, criteria.excludeJunk, reasons);
   const keywordMismatch = keywordReason(text, criteria.keyword, reasons);
+  const accessoryOnly = ACCESSORY_ONLY.test(lower);
+  if (accessoryOnly) reasons.push("付属品・箱のみ");
   const hdd = /hdd|ハードディスク/.test(lower) && !/ssd/.test(lower);
   if (hdd) reasons.push("HDD");
   const enclosure = /ssdケース|外付けケース|usb\d|変換アダプタ|sataケーブル/.test(lower);
@@ -890,7 +902,7 @@ function ssdClassify(text: string, criteria: SsdCriteria): Verdict {
   if (!evidence) reasons.push("SSDを確認できない");
   const typeOk = criteria.type === "any" || (criteria.type === "nvme" ? nvme : sata);
   const capacityKnown = criteria.capacity === "any" || (SSD_CAPACITY_PATTERNS[criteria.capacity]?.test(lower) ?? false);
-  const blocked = junk || hdd || enclosure || typeMismatch || capacityMismatch || keywordMismatch;
+  const blocked = junk || hdd || enclosure || typeMismatch || capacityMismatch || keywordMismatch || accessoryOnly;
   return { confidence: blocked ? "excluded" : evidence && typeOk && capacityKnown ? "candidate" : "review", reasons };
 }
 
