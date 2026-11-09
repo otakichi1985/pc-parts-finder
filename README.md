@@ -55,3 +55,8 @@
 - アプリ本体: `app/`（Tauri 2 + React + TypeScript）。開発手順は `app/README.md`
 - ブラウザ拡張（将来用の補助）: `extension/`
 - リリースはバージョンタグ（`vX.Y.Z`）のpushで自動ビルドされ、GitHub Releasesに公開されます
+
+## ライセンス
+
+MIT License（`LICENSE` を参照）。
+
